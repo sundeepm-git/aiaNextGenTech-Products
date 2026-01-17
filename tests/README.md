@@ -15,22 +15,16 @@ pytest
 pytest --cov=. --cov-report=html
 
 # Run specific test file
-pytest tests/test_agents.py
+pytest tests/test_utils.py
 
 # Run specific test
-pytest tests/test_agents.py::test_agent_initialization
+pytest tests/test_utils.py::test_get_env_var_existing
 ```
 
-## Test Structure
+## Current Tests
 
-```
-tests/
-├── test_agents/      # Agent tests
-├── test_models/      # Model tests
-├── test_utils/       # Utility tests
-├── conftest.py       # Shared fixtures
-└── README.md         # This file
-```
+- `test_utils.py` - Tests for utility functions
+- `conftest.py` - Shared pytest fixtures
 
 ## Writing Tests
 
@@ -43,3 +37,10 @@ tests/
 ## Test Coverage
 
 Aim for at least 80% code coverage for new features.
+
+## Future Test Structure
+
+As the project grows, tests will be organized into subdirectories:
+- `test_agents/` - Agent tests
+- `test_models/` - Model tests
+- Additional test modules as needed

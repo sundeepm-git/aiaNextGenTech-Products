@@ -1,12 +1,11 @@
 """
 Example agent using the BaseAgent class.
+
+To run this example:
+1. Install the package in development mode: pip install -e .
+2. Or add the project root to PYTHONPATH: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+3. Then run: python examples/base_agent_example.py
 """
-
-import sys
-import os
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agents.base import BaseAgent
 

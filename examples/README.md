@@ -4,25 +4,45 @@ Sample implementations and usage patterns for GenAI and AgenticAI products.
 
 ## Available Examples
 
-Examples will be added to demonstrate:
+- `simple_agent.py` - Basic agent template with dotenv
+- `base_agent_example.py` - Demonstrates extending BaseAgent class
+
+Examples demonstrate:
 - Basic agent creation and usage
-- Prompt engineering techniques
-- Multi-agent collaboration
-- Tool integration
-- RAG (Retrieval-Augmented Generation) implementations
-- Custom agent workflows
+- Extending the BaseAgent class
+- Agent conversation history management
+- Proper agent architecture patterns
 
 ## Running Examples
 
+### Option 1: Using PYTHONPATH (Quick)
+```bash
+# Set PYTHONPATH to project root
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+
+# Run an example
+python examples/base_agent_example.py
+```
+
+### Option 2: Install in Development Mode (Recommended)
 ```bash
 # Activate virtual environment
 source venv/bin/activate
 
-# Set up environment variables
+# Install package in development mode
+pip install -e .
+
+# Run an example
+python examples/base_agent_example.py
+```
+
+### Option 3: With Dependencies
+```bash
+# For examples that use external APIs
 cp .env.example .env
 # Edit .env with your API keys
 
-# Run an example
+# Run example
 python examples/simple_agent.py
 ```
 
