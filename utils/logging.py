@@ -41,7 +41,7 @@ def setup_logger(
         log_path = Path(log_file)
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_file)
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
             file_handler.setLevel(getattr(logging, level.upper()))
             file_handler.setFormatter(console_format)
             logger.addHandler(file_handler)
