@@ -39,11 +39,13 @@ def setup_logger(
     # File handler (if specified)
     if log_file:
         log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(getattr(logging, level.upper()))
-        file_handler.setFormatter(console_format)
-        logger.addHandler(file_handler)
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(getattr(logging, level.upper()))
+            file_handler.setFormatter(console_format)
+            logger.addHandler(file_handler)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Could not create log file {log_file}: {e}")
     
     return logger
