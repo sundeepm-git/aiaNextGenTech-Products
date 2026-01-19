@@ -53,7 +53,7 @@ export default function ThreatDetectionPage() {
       name: 'Threat Detection Pro',
       description: 'AI-powered real-time threat detection with anomaly analysis',
       icon: ShieldCheckIcon,
-      color: 'blue',
+      color: 'primary',
       capabilities: ['Anomaly Detection', 'Pattern Recognition', 'Behavioral Analysis', 'Real-time Monitoring']
     },
     {
@@ -69,7 +69,7 @@ export default function ThreatDetectionPage() {
       name: 'Security Analytics',
       description: 'Advanced security data analytics and threat intelligence',
       icon: ChartBarIcon,
-      color: 'purple',
+      color: 'secondary',
       capabilities: ['Log Analysis', 'Threat Intelligence', 'Forensics', 'Reporting']
     },
     {
@@ -197,12 +197,14 @@ export default function ThreatDetectionPage() {
 
   const getColorClasses = (color) => {
     const colors = {
-      blue: 'from-blue-500 to-blue-600',
+      primary: 'from-primary to-primary/80',
+      blue: 'from-primary to-secondary', // Fallback or alternative
       yellow: 'from-yellow-500 to-orange-600',
-      purple: 'from-purple-500 to-purple-600',
+      secondary: 'from-secondary to-purple-600',
+      purple: 'from-secondary to-purple-600',
       red: 'from-red-500 to-red-600',
     };
-    return colors[color] || colors.blue;
+    return colors[color] || colors.primary;
   };
 
   return (
@@ -224,19 +226,19 @@ export default function ThreatDetectionPage() {
               type="checkbox"
               checked={productEnabled}
               onChange={(e) => setProductEnabled(e.target.checked)}
-              className="w-12 h-6 rounded-full appearance-none bg-gray-300 dark:bg-gray-600 checked:bg-blue-600 relative cursor-pointer transition-colors"
+              className="w-12 h-6 rounded-full appearance-none bg-gray-300 dark:bg-gray-600 checked:bg-primary relative cursor-pointer transition-colors"
             />
           </label>
         </div>
       </div>
 
       {/* Product Overview Section */}
-      <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-red-600 rounded-xl p-8 text-white shadow-2xl">
+      <div className="bg-gradient-to-r from-primary via-secondary to-red-600 rounded-xl p-8 text-white shadow-2xl">
         <div className="flex items-start gap-6">
           <ShieldCheckIcon className="h-16 w-16 flex-shrink-0 opacity-90" />
           <div className="flex-1">
             <h2 className="text-3xl font-bold mb-3">Unified Cybersecurity Platform</h2>
-            <p className="text-blue-100 mb-6 text-lg">
+            <p className="text-white/90 mb-6 text-lg">
               nextGen-ThreatDetection combines four powerful AI agents into one comprehensive security suite.
               Detect threats, scan vulnerabilities, analyze security data, and automate incident response - all from a single interface.
             </p>
@@ -271,6 +273,13 @@ export default function ThreatDetectionPage() {
           {agents.map((agent) => {
             const Icon = agent.icon;
             const isActive = activeAgent === agent.id || activeAgent === 'all';
+            
+            const getActiveStyle = (color) => {
+              if (color === 'primary') return 'border-primary bg-primary/10 dark:bg-primary/20 shadow-lg scale-105';
+              if (color === 'secondary') return 'border-secondary bg-secondary/10 dark:bg-secondary/20 shadow-lg scale-105';
+              return `border-${color}-500 bg-${color}-50 dark:bg-${color}-900/20 shadow-lg scale-105`;
+            };
+
             return (
               <button
                 key={agent.id}
@@ -278,7 +287,7 @@ export default function ThreatDetectionPage() {
                 disabled={!productEnabled}
                 className={`p-5 rounded-xl border-2 transition-all text-left ${
                   isActive
-                    ? `border-${agent.color}-500 bg-${agent.color}-50 dark:bg-${agent.color}-900/20 shadow-lg scale-105`
+                    ? getActiveStyle(agent.color)
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
@@ -287,7 +296,7 @@ export default function ThreatDetectionPage() {
                     <Icon className="h-6 w-6" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
+                    <h4 className={`font-semibold text-sm mb-1 ${isActive ? 'text-black dark:text-white' : 'text-gray-900 dark:text-white'}`}>
                       {agent.name}
                     </h4>
                     {isActive && (
@@ -297,7 +306,7 @@ export default function ThreatDetectionPage() {
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
+                <p className={`text-xs mb-3 ${isActive ? 'text-black dark:text-gray-300' : 'text-gray-600 dark:text-gray-400'}`}>
                   {agent.description}
                 </p>
                 <div className="flex flex-wrap gap-1">
@@ -322,7 +331,7 @@ export default function ThreatDetectionPage() {
       {/* Azure Connection Panel */}
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center gap-3 mb-4">
-          <CloudArrowUpIcon className="h-6 w-6 text-blue-500" />
+          <CloudArrowUpIcon className="h-6 w-6 text-primary" />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
             Azure Connection Status
           </h3>
@@ -345,7 +354,7 @@ export default function ThreatDetectionPage() {
                   value={azureConfig.subscriptionId}
                   onChange={(e) => setAzureConfig({ ...azureConfig, subscriptionId: e.target.value })}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:text-white"
                   aria-label="Azure Subscription ID"
                 />
               </div>
@@ -358,7 +367,7 @@ export default function ThreatDetectionPage() {
                   value={azureConfig.tenantId}
                   onChange={(e) => setAzureConfig({ ...azureConfig, tenantId: e.target.value })}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:text-white"
                   aria-label="Azure Tenant ID"
                 />
               </div>
@@ -371,7 +380,7 @@ export default function ThreatDetectionPage() {
                   value={azureConfig.resourceGroup}
                   onChange={(e) => setAzureConfig({ ...azureConfig, resourceGroup: e.target.value })}
                   placeholder="my-resource-group"
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:text-white"
                   aria-label="Azure Resource Group"
                 />
               </div>
@@ -379,7 +388,7 @@ export default function ThreatDetectionPage() {
             <button
               onClick={handleAzureConnect}
               disabled={!azureConfig.subscriptionId || !azureConfig.tenantId}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-6 py-2 bg-primary hover:opacity-90 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Connect to Azure
             </button>
@@ -426,7 +435,7 @@ export default function ThreatDetectionPage() {
               placeholder="Describe your security concern or command in natural language...&#10;&#10;Examples:&#10;• Scan all VMs in production for vulnerabilities and malware&#10;• Analyze security logs for suspicious activity in the last 24 hours&#10;• Check IAM permissions for over-privileged accounts&#10;• Run comprehensive threat detection across all Azure resources&#10;• Investigate unusual network traffic patterns&#10;• Execute incident response playbook for detected threats"
               rows={10}
               disabled={!productEnabled || !azureConnected}
-              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:text-white resize-none text-sm"
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:text-white resize-none text-sm"
               aria-label="Natural language security input"
             />
             <button
@@ -435,7 +444,7 @@ export default function ThreatDetectionPage() {
               className={`absolute bottom-4 right-4 p-3 rounded-full transition-all ${
                 isListening
                   ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
-                  : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
+                  : 'bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white'
               } disabled:opacity-50 disabled:cursor-not-allowed shadow-lg`}
               aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
             >
@@ -448,7 +457,7 @@ export default function ThreatDetectionPage() {
               <button
                 onClick={handleStartScan}
                 disabled={!productEnabled || !azureConnected || !nlpInput.trim()}
-                className="px-8 py-3 bg-gradient-to-r from-blue-600 via-purple-600 to-red-600 hover:from-blue-700 hover:via-purple-700 hover:to-red-700 text-white rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+                className="px-8 py-3 bg-gradient-to-r from-primary via-secondary to-red-600 hover:opacity-90 text-white rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
               >
                 <PlayIcon className="h-5 w-5" />
                 Execute Security Scan
@@ -513,10 +522,10 @@ export default function ThreatDetectionPage() {
 
           {/* Step 3: Threat Detection */}
           <div className={`text-center p-4 rounded-lg border-2 ${
-            scanInProgress || scanResults ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
+            scanInProgress || scanResults ? 'border-primary bg-primary/10 dark:bg-primary/20' : 'border-gray-300 dark:border-gray-600'
           }`}>
             <div className="flex justify-center mb-2">
-              <ShieldCheckIcon className={`h-8 w-8 ${scanInProgress || scanResults ? 'text-blue-600' : 'text-gray-400'}`} />
+              <ShieldCheckIcon className={`h-8 w-8 ${scanInProgress || scanResults ? 'text-primary' : 'text-gray-400'}`} />
             </div>
             <p className="font-semibold text-sm text-gray-900 dark:text-white">Threat Detect</p>
             <p className="text-xs text-gray-600 dark:text-gray-400">Agent 1</p>
@@ -566,14 +575,14 @@ export default function ThreatDetectionPage() {
       {scanInProgress && (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Multi-Agent Security Scan in Progress...
             </h3>
           </div>
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-6 overflow-hidden shadow-inner">
             <div
-              className="h-full bg-gradient-to-r from-blue-600 via-purple-600 to-red-600 transition-all duration-500 flex items-center justify-end pr-2"
+              className="h-full bg-gradient-to-r from-primary via-secondary to-red-600 transition-all duration-500 flex items-center justify-end pr-2"
               style={{ width: `${scanProgress}%` }}
             >
               <span className="text-white text-xs font-bold">{scanProgress}%</span>
@@ -632,7 +641,7 @@ export default function ThreatDetectionPage() {
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Resources</p>
-                <CloudArrowUpIcon className="h-6 w-6 text-blue-500" />
+                <CloudArrowUpIcon className="h-6 w-6 text-primary" />
               </div>
               <p className="text-4xl font-bold text-gray-900 dark:text-white">
                 {scanResults.resourcesScanned}
@@ -664,8 +673,8 @@ export default function ThreatDetectionPage() {
             
             {/* Threat Detection Results */}
             <div className="mb-6">
-              <div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <ShieldCheckIcon className="h-6 w-6 text-blue-600" />
+              <div className="flex items-center gap-3 mb-4 p-3 bg-primary/10 dark:bg-primary/20 rounded-lg">
+                <ShieldCheckIcon className="h-6 w-6 text-primary" />
                 <h4 className="font-semibold text-gray-900 dark:text-white">Threat Detection Pro - Anomaly Analysis</h4>
               </div>
               <div className="overflow-x-auto">
@@ -708,7 +717,7 @@ export default function ThreatDetectionPage() {
                         <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
                           <div className="flex items-center gap-2">
                             <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                              <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${anomaly.confidence}%` }}></div>
+                              <div className="bg-primary h-2 rounded-full" style={{ width: `${anomaly.confidence}%` }}></div>
                             </div>
                             <span className="text-xs font-semibold">{anomaly.confidence}%</span>
                           </div>
@@ -790,8 +799,8 @@ export default function ThreatDetectionPage() {
               </div>
               <div className="space-y-3">
                 {scanResults.recommendations.map((rec, index) => (
-                  <div key={index} className="flex items-start gap-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <CheckCircleIcon className="h-6 w-6 text-blue-600 flex-shrink-0 mt-1" />
+                  <div key={index} className="flex items-start gap-4 p-4 bg-primary/10 dark:bg-primary/20 rounded-lg border border-primary/20 dark:border-primary/20">
+                    <CheckCircleIcon className="h-6 w-6 text-primary flex-shrink-0 mt-1" />
                     <div className="flex-1">
                       <div className="flex items-start justify-between gap-4 mb-2">
                         <h5 className="font-semibold text-gray-900 dark:text-white">

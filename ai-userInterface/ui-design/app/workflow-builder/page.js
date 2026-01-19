@@ -36,7 +36,7 @@ export default function WorkflowBuilderPage() {
       {/* Page Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-          Workflow Builder
+          Intelligent Automation
         </h1>
         <p className="text-gray-600 dark:text-gray-400">
           Design and orchestrate multi-agent workflows
@@ -94,7 +94,7 @@ export default function WorkflowBuilderPage() {
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-white ${
                     step.status === 'Completed' ? 'bg-green-500' :
-                    step.status === 'Running' ? 'bg-blue-500' :
+                    step.status === 'Running' ? 'bg-primary' :
                     'bg-gray-400'
                   }`}>
                     {index + 1}
@@ -111,7 +111,7 @@ export default function WorkflowBuilderPage() {
                       </div>
                       <span className={`px-3 py-1 text-xs font-medium rounded-full ${
                         step.status === 'Completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
-                        step.status === 'Running' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
+                        step.status === 'Running' ? 'bg-primary/20 text-primary dark:bg-primary/20 dark:text-primary' :
                         'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                       }`}>
                         {step.status}
@@ -180,7 +180,7 @@ export default function WorkflowBuilderPage() {
 
       {/* Products */}
       <CategoryCard
-        title="Workflow Builder Products"
+        title="Intelligent Automation Products"
         icon={CogIcon}
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

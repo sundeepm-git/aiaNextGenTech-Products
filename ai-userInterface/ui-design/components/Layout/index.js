@@ -2,12 +2,15 @@
 
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
+import { useApp } from '@/context/AppContext';
 
 const Layout = ({ children }) => {
+  const { sidebarOpen } = useApp();
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen transition-colors duration-300">
       <Sidebar />
-      <div className="lg:pl-64">
+      <div className={`transition-all duration-300 ${sidebarOpen ? 'lg:pl-64' : 'lg:pl-16'}`}>
         <Navbar />
         <main className="p-6">
           {children}
