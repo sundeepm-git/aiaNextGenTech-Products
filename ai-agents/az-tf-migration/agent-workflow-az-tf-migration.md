@@ -1,181 +1,360 @@
+#### MCP Server Implementation (Remote/Local Integration)
 
-# Azure → Terraform Migration (Agentic AI Workflow) — End‑to‑End Runbook
+##### Why this approach
+The New Foundry agent service can connect to remote MCP servers and let agents invoke tools exposed by those servers, with approval workflows and multiple authentication modes. You point Foundry to your local/self-hosted MCP endpoint, enable your custom tool, paste its schemas, and call it from the agent. Save after edits in Agents/Workflows (Foundry does not auto-save).
 
-**File:** `az-tf-migration.md`  
-**Owner:** Platform Engineering / Enterprise Architecture  
-**Last updated:** 2026-01-19
-
-> This runbook documents a production blueprint for migrating existing Azure resources to Terraform using **Microsoft Foundry (New)** workflow designer, publishable **Agents as APIs**, and a UI that triggers the workflow via **NLP prompts**. It incorporates: local Terraform state (initial phase), custom **JSON naming standards** for refactor, `aztfexport`-based export, subscription‑wise pipeline generation, and a detailed, step‑by‑step configuration guide for the Foundry Workflow nodes.
-
----
-
-## 0) What’s New & References
-- **Foundry (New) Workflow Designer** — build visual, declarative sequences; add agent/tool nodes; support sequential, human‑in‑loop, and group chat patterns. citeturn8search3
-- **New Agent Service** — prompt/workflow/container agents; publishable as endpoints; enterprise features; migration path from classic Assistants API. citeturn8search4
-- **Multi‑agent orchestration patterns & samples** (group chat, variables, approvals), including how to pass variables and gates. citeturn8search5
-- **VS Code (low‑code) authoring** option for Foundry workflows/agents (optional). citeturn8search6
-- **Published agent → Responses API (OpenAI‑compatible)** for programmatic UI integration; RBAC via Azure AI User role. citeturn8search8
+Auth options for MCP tools: key-based, Agent Managed Identity, Project Managed Identity, or OAuth passthrough (pick per RBAC model).
+  - All downstream references use the full output variable and dot notation to access subfields.
 
 ---
 
-## 1) Objectives & Scope
-**Goals**
-1. Assess Azure subscription(s).  
-2. Export resources with **aztfexport** (subscription → single/multiple RG).  
-3. **Refactor** exported HCL to org standards using **custom JSON naming standard**.  
-4. Generate **subscription‑wise pipelines** parameterized by Resource Group.  
-5. Orchestrate with **Foundry Workflow (New)** and expose an **Agent as an API** for UI‑driven NLP execution.  
+Below is the **minimum** code to host a **local MCP server** that exposes a single tool named **`execute_powershell_assessment`**, calls your PowerShell script, and returns the required JSON with `.xlsx` and `.pdf` artifact paths.
 
-**Out of Scope**
-- Remote backend enablement (initially **local state only**).  
-- App configuration/validation; shared infra provisioning.  
+You’ll create **two files** (plus your existing PowerShell script):
 
----
+*   `package.json`
+*   `server.js`
+*   *(Your script)* `./scripts/run-assessment.ps1` (already written by you)
 
-## 2) High‑Level Architecture
-```mermaid
-flowchart LR
-  UI[Custom UI (NLP Prompt)] -->|POST /responses| AGENT[MigrationOrchestrator-Agent (Published API)]
-  AGENT -->|Parameters| WF[Azure-Terraform-Migration-Workflow]
-  subgraph Azure-Terraform-Migration-Workflow
-    A[AssessmentPS-Tool]
-    E[AztfExportPS-Tool]
-    R[TerraformRefactor-Agent\n+ naming-standard.json]
-    G[GitOps-Tool (PR)]
-    P[PipelineGenerator-Tool]
-  end
-  WF --> A --> E --> R --> G --> P
-  WF --> KV[(Key Vault / Secrets)]
-  WF --> ST[(Artifacts & Local tfstate)]
+***
+
+## 1) `package.json`
+
+```json
+{
+  "name": "mcp-assessment-minimal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
 ```
-**Designer & patterns** from Foundry (New) Workflows blade. citeturn8search3  
-**Publishable agents** exposed as endpoints for external UI integration. citeturn8search4turn8search8
 
----
+***
 
-## 3) Prerequisites
-- Azure subscription with **Foundry (New)** access; create/select a project in the portal. citeturn8search3turn8search7  
-- Service principals with least privilege (Reader for assess/export; Contributor only for repo/pipeline ops).  
-- Signed PowerShell scripts: `run-assessment.ps1`, `run-aztfexport.ps1`.
-- GitHub repository connected for PRs and pipelines.
+## 2) `server.js` (minimal MCP server)
 
----
+```js
+import express from "express";
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
 
-## 4) Foundry Workflow — Designer Steps (Sequential Pattern)
-This section explains **exact names of agents/tools** and **how to configure** each node **step‑by‑step** in **Microsoft Foundry (New)**. The guidance aligns with the official workflow‑builder docs (create → assign agents → add nodes → save/run). citeturn8search3
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-### 4.1 Agent & Tool Names (use these exact names)
-**Agents (LLM)**
-- **MigrationOrchestrator-Agent** — Interprets NLP prompt from UI, extracts parameters for the workflow. (Prompt‑based Agent, **Published**) citeturn8search4  
-- **TerraformRefactor-Agent** — Refactors exported HCL using `naming-standard.json`. (Prompt‑based Agent) citeturn8search3  
-- *(Optional)* **ReviewAssistant-Agent** — Provides PR advisory comments. (Prompt‑based Agent)
+const app = express();
+app.use(express.json({ limit: "1mb" }));
 
-**Tools**
-- **AssessmentPS-Tool** — Executes `run-assessment.ps1` to produce `assessment.json`. citeturn8search3  
-- **AztfExportPS-Tool** — Executes `run-aztfexport.ps1` to produce HCL + local `.tfstate`. citeturn8search3  
-- **GitOps-Tool** — Commits refactored code, opens PR in GitHub. citeturn8search3  
-- **PipelineGenerator-Tool** — Writes subscription‑level GitHub workflow (RG parameter). citeturn8search3
+// ---- MCP discovery: what tools we expose ----
+app.get("/.well-known/mcp", (req, res) => {
+  res.json({
+    tools: [
+      {
+        name: "execute_powershell_assessment",
+        inputSchema: {
+          type: "object",
+          required: ["subscriptionId", "resourceGroups", "outPath"],
+          properties: {
+            subscriptionId: { type: "string" },
+            resourceGroups: {
+              type: "array",
+              items: { type: "string" },
+              minItems: 1
+            },
+            outPath: { type: "string" }
+          },
+          additionalProperties: false
+        },
+        outputSchema: {
+          type: "object",
+          required: ["status", "artifacts"],
+          properties: {
+            status: { type: "string", enum: ["completed", "failed"] },
+            subscriptionId: { type: "string" },
+            outPath: { type: "string" },
+            artifacts: {
+              type: "object",
+              required: ["xlsx", "pdf"],
+              properties: {
+                xlsx: { type: "string" },
+                pdf: { type: "string" }
+              },
+              additionalProperties: false
+            },
+            message: { type: "string" }
+          },
+          additionalProperties: false
+        }
+      }
+    ]
+  });
+});
 
----
+// ---- MCP tool invocation ----
+app.post("/tools/execute_powershell_assessment", (req, res) => {
+  const body = req.body || {};
+  const subscriptionId = (body.subscriptionId || "").trim();
+  const resourceGroups = Array.isArray(body.resourceGroups) ? body.resourceGroups : [];
+  const outPath = (body.outPath || "/assessment").trim();
 
-### 4.2 Create the Workflow (once)
-1) In Foundry, go to **Build → Workflows** → **Create → Sequential**. citeturn8search3  
-2) Name it: `Azure-Terraform-Migration-Workflow`.  
-3) Click **Save** (Workflows **do not** auto‑save). citeturn8search3
+  if (!subscriptionId || resourceGroups.length === 0) {
+    return res.status(400).json({
+      status: "failed",
+      message: "subscriptionId (string) and resourceGroups (non-empty array) are required"
+    });
+  }
 
----
+  // Build PowerShell call:
+  //   ./scripts/run-assessment.ps1 -SubscriptionId <id> -ResourceGroups <rg1,rg2> -OutPath <dir>
+  const scriptPath = path.resolve(__dirname, "scripts", "run-assessment.ps1");
+  const rgCsv = resourceGroups.join(",");
 
-### 4.3 Node 1 — **MigrationOrchestrator-Agent** (NLP → parameters)
-**Add**: **+ Add Node → Agent** → select **MigrationOrchestrator-Agent**. citeturn8search3  
-**Prompt** (example):
+  const ps = spawn("pwsh", [
+    "-NoLogo",
+    "-NonInteractive",
+    "-File", scriptPath,
+    "-SubscriptionId", subscriptionId,
+    "-ResourceGroups", rgCsv,
+    "-OutPath", outPath
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+
+  let stderr = "";
+  ps.stderr.on("data", d => { stderr += String(d); });
+
+  ps.on("close", (code) => {
+    if (code !== 0) {
+      return res.json({
+        status: "failed",
+        message: (stderr || "Assessment failed").slice(0, 1000)
+      });
+    }
+    // Return artifact paths expected by your Foundry agent/workflow
+    return res.json({
+      status: "completed",
+      subscriptionId,
+      outPath,
+      artifacts: {
+        xlsx: `${outPath}/AzTfExport_Managed_RG_Report.xlsx`,
+        pdf:  `${outPath}/AzTfExport_Managed_RG_Report.pdf`
+      }
+    });
+  });
+});
+
+// Basic liveness
+app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`MCP server listening on http://localhost:${PORT}`);
+});
 ```
-You extract subscriptionId, tenantId, scope (subscription|resourceGroup), resourceGroups (list),
-namingJson, repoUrl, and branchName from user natural language input. Output a compact JSON
-object with these fields for downstream nodes.
+
+> **That’s it.** This is the smallest workable server:
+>
+> *   **`GET /.well-known/mcp`** advertises one tool with your **exact schemas**.
+> *   **`POST /tools/execute_powershell_assessment`** runs PowerShell and returns the **required JSON**.
+
+***
+
+## 3) Your PowerShell script location
+
+Place your existing script here:
+
+    ./scripts/run-assessment.ps1
+
+**It must accept**:
+
+    -SubscriptionId <guid> -ResourceGroups <commaSeparated> -OutPath <folder>
+
+…and **write both**:
+
+    <OutPath>/AzTfExport_Managed_RG_Report.xlsx
+    <OutPath>/AzTfExport_Managed_RG_Report.pdf
+
+***
+
+## 4) Run locally
+
+```bash
+# from the mcp-assessment-minimal folder:
+#### 2) Prerequisites on your MCP host
+  - PowerShell 7+ (pwsh)
+# server -> http://localhost:8080
 ```
-**Output variable mappings** (use Local.*):
-- `Local.subscriptionId`
-- `Local.tenantId`
-- `Local.scope`
-- `Local.resourceGroups`
-- `Local.namingJson`
-- `Local.repoUrl`
-- `Local.branchName`
 
-*Tip:* Foundry workflows support passing data via variables like `Local.*` and using logic nodes with conditions; this mirrors the variable usage patterns in official samples. citeturn8search5
+Quick test (optional):
 
----
-
-### 4.4 Node 2 — **AssessmentPS-Tool** (PowerShell)
-**Add**: **+ Add Node → Tool** → select **AssessmentPS-Tool**. citeturn8search3  
-**Inputs**:
-- `SubscriptionId = Local.subscriptionId`
-- `TenantId = Local.tenantId`
-- `OutPath = /assessment`
-**Outputs**:
-- `Local.assessmentOutput = /assessment/assessment.json`
-
----
-
-### 4.5 Node 3 — **AztfExportPS-Tool** (PowerShell)
-**Add**: **+ Add Node → Tool** → select **AztfExportPS-Tool**. citeturn8search3  
-**Inputs**:
-- `SubscriptionId = Local.subscriptionId`
-- `TenantId = Local.tenantId`
-- `ResourceGroups = Local.resourceGroups`
-- `OutPath = /export`
-**Outputs**:
-- `Local.exportOutput = /export` (HCL + **local** `terraform.tfstate`)
-
----
-
-### 4.6 Node 4 — **TerraformRefactor-Agent** (LLM)
-**Add**: **+ Add Node → Agent** → select **TerraformRefactor-Agent**. citeturn8search3  
-**Prompt** (summary):
+```bash
+curl -s http://localhost:8080/.well-known/mcp | jq
+curl -s -X POST http://localhost:8080/tools/execute_powershell_assessment \
+  -H "Content-Type: application/json" \
+  -d '{"subscriptionId":"00000000-0000-0000-0000-000000000123","resourceGroups":["rg-app-dev","rg-data-dev"],"outPath":"/assessment"}' | jq
 ```
-Use Local.namingJson and Local.exportOutput to refactor the exported Terraform code.
-Apply naming standards, tagging rules, and approved modules. Preserve local tfstate.
-Generate refactor_report.md and a compilable structure under /refactored.
+
+You should receive a `completed` JSON with the two artifact paths—or a `failed` message if the script errored.
+
+***
+
+## 5) Connect it to Microsoft Foundry (agent → Custom MCP tool)
+
+1.  **Build → Agents →** open your agent (e.g., `infraAzTfAssessmentAgent‑v1`)
+2.  **Tools → Add tool → Custom → Add Model Context Protocol tool**
+    *   **Name:** `assessment_ps_runner`
+    *   **Remote MCP Server endpoint:** `http://YOUR-HOST:8080` *(use HTTPS if exposing beyond local)*
+    *   **Authentication:**
+        *   For local dev, use **Key-based** and add something like `x-dev-key : my-local-key` (and optionally check it in your server).
+        *   For prod, prefer **Agent/Project Managed Identity** and secure your endpoint.
+3.  **Connect** → Foundry lists tools → enable **`execute_powershell_assessment`**
+4.  Paste the **same Input/Output schemas** (from above) → **Save**
+5.  In your agent **Instructions**, tell it to call:
+    ```json
+    {
+      "subscriptionId": "<id>",
+      "resourceGroups": ["<rg1>","<rg2>"],
+      "outPath": "/assessment"
+    }
+    ```
+6.  Test in the agent playground, then add the agent to a **Sequential** workflow.
+
+***
+
+### Want a minimal **Python** version instead of Node?
+
+Say **“Python minimal MCP server”** and I’ll give you the equivalent `FastAPI` server in ~60 lines.
+  - Az PowerShell modules, ImportExcel, wkhtmltopdf (for PDF)
+  - ./run-assessment.ps1
+  - ./ManagedResourcePolicy.json
+
+#### 3) Implement the MCP server (minimal skeleton)
+Expose a tool named execute_powershell_assessment with your Input/Output JSON Schemas, execute pwsh, and return JSON.
+
+**Node.js (Express-like pseudo-server):**
+```js
+// server.js (illustrative pseudo-code)
+import express from "express";
+import bodyParser from "body-parser";
+import { spawn } from "child_process";
+const app = express();
+app.use(bodyParser.json());
+app.get("/.well-known/mcp", (_req, res) => {
+  res.json({
+    tools: [{
+      name: "execute_powershell_assessment",
+      inputSchema: { ... },
+      outputSchema: { ... }
+    }]
+  });
+});
+app.post("/tools/execute_powershell_assessment", async (req, res) => {
+  // Validate, run pwsh, return JSON as in previous example
+});
+app.listen(8080);
 ```
-**Inputs**:
-- `exportPath = Local.exportOutput`
-- `namingJson = Local.namingJson`
-**Outputs**:
-- `Local.refactorOutput = /refactored`
+
+**Python (FastAPI-like pseudo-server):**
+```python
+# server.py (illustrative pseudo-code)
+from fastapi import FastAPI
+from pydantic import BaseModel
+import subprocess
+app = FastAPI()
+class ExecInput(BaseModel):
+    subscriptionId: str
+    resourceGroups: list[str]
+    outPath: str | None = "/assessment"
+@app.get("/.well-known/mcp")
+def capabilities():
+    return { ... }  # Advertise tool and schemas
+@app.post("/tools/execute_powershell_assessment")
+def run_tool(inp: ExecInput):
+    # Validate, run pwsh, return JSON as in previous example
+```
+
+The exact MCP protocol surface (well-known path, handshake) depends on your chosen SDK; see Microsoft’s MCP + Foundry guidance and community samples for concrete server templates and tool registration helpers.
+
+#### 4) (Optional) Add auth to your MCP server
+Pick one model to authenticate Foundry → your MCP server:
+
+#### 5) Connect your local server in Foundry → Agent → Add tool → Custom
+In your agent (infraAzTfAssessmentAgent-v1):
+  - Name: assessment_ps_runner
+  - Remote MCP Server endpoint: https://<YOUR_HOST>:8080
+  - Authentication: Key-based (add headers) or Agent/Project Managed Identity
+
+#### 6) Update the agent’s Instructions to call the tool
+Add this block to the agent:
+Call the MCP tool "execute_powershell_assessment" with:
+{
+  "subscriptionId": "<subscriptionId>",
+  "resourceGroups": ["<rg1>", "<rg2>", ...],
+  "outPath": "<outPath>"
+}
+Wait for the tool result and return JSON only with:
+{
+  "status":"AssessmentInitiated",
+  "subscriptionId":"<subscriptionId>",
+  "outPath":"<outPath>",
+  "artifacts":{"xlsx":"<path>","pdf":"<path>"}
+}
+If the tool fails, return {"status":"failed","message":"<brief>"} only.
+
+#### 7) Test the agent, then add to a Workflow
+Agent test: Use the agent playground → provide subscriptionId, resourceGroups[], optional outPath → run. Approve the tool call if prompted. Should return JSON with .xlsx + .pdf. (If RBAC errors, grant Reader to the identity in Azure.)
+Workflow: Build → Workflows → Create → Sequential → Save. Add:
+  - Node 1: NLP agent (extracts inputs) → Save agent output as Local.orchestratorOutput
+  - Node 2: Assessment agent:
+    - subscriptionId = {{Local.orchestratorOutput.subscriptionId}}
+    - resourceGroups = {{Local.orchestratorOutput.resourceGroups}}
+    - outPath        = {{Local.orchestratorOutput.outPath}}
+    - Save agent output as Local.assessmentOutput
+    - Downstream nodes can use:
+      - {{Local.assessmentOutput.artifacts.xlsx}}
+      - {{Local.assessmentOutput.artifacts.pdf}}
+
+Click Run Workflow. (Designer creation/saving/running per New Foundry docs.)
+
+#### 8) Troubleshooting
+
+#### 9) (Optional) Publish the agent for your UI
+Publish the agent to get an OpenAI-compatible Responses API for your UI to call (POST /responses), governed by RBAC.
+
 
 ---
 
-### 4.7 Node 5 — **GitOps-Tool** (commit + PR)
-**Add**: **+ Add Node → Tool** → select **GitOps-Tool**. citeturn8search3  
-**Inputs**:
-- `Repo = Local.repoUrl`
-- `Branch = Local.branchName`
-- `CommitPath = Local.refactorOutput`
-**Outputs**:
-- `Local.prUrl`
+### 1.3 Node 3 — **aztF Export Node (AztfExportPS-Tool)**
+**Add**: **+ Add Node → Tool** → select **AztfExportPS-Tool**.  
+**Purpose**: Exports Azure resources to Terraform HCL and local tfstate using aztfexport.
 
 ---
 
-### 4.8 Node 6 — **PipelineGenerator-Tool** (write CI YAML)
-**Add**: **+ Add Node → Tool** → select **PipelineGenerator-Tool**. citeturn8search3  
-**Inputs**:
-- `subscriptionId = Local.subscriptionId`
-- `pipelineType = "github"`
-- (optional) `rgParamEnabled = true`
-**Outputs**:
-- path to generated `.github/workflows/terraform-${subscriptionId}.yml`
+### 1.4 Node 4 — **Code Refactor Node (TerraformRefactor-Agent)**
+**Add**: **+ Add Node → Agent** → select **TerraformRefactor-Agent**.  
+**Purpose**: Refactors exported Terraform code using naming standards and tagging rules.
 
 ---
 
-### 4.9 Optional — **ReviewAssistant-Agent** (advice)
+### 1.5 Node 5 — **GitHub Pipeline Update (GitOps-Tool & PipelineGenerator-Tool)**
+**Add**: **+ Add Node → Tool** → select **GitOps-Tool** and **PipelineGenerator-Tool**.  
+**Purpose**: Commits refactored code, opens PR in GitHub, and writes subscription-level GitHub workflow for CI/CD.
+
+---
+
+### 1.6 Optional — **ReviewAssistant-Agent** (advice)
 You can insert **ReviewAssistant-Agent** before/after PR creation to auto‑summarize the diff or suggest fixes. citeturn8search3
 
 ---
 
-### 4.10 Save & Run
+### 1.7 Save & Run
 1) Click **Save** (required; no auto‑save). citeturn8search3  
 2) Click **Run Workflow**. Interact via chat and provide an NLP instruction, e.g.:  
-   _“Export RG `rg-app-dev` from subscription `0000-...-0000`, apply naming profile JSON `std-v2`, and open a PR.”_  
+  _“Export RG `rg-app-dev` from subscription `0000-...-0000`, apply naming profile JSON `std-v2`, and open a PR.”_  
 3) The workflow executes sequentially; you can add human‑in‑the‑loop approvals if needed. citeturn8search3turn8search5
 
 ---
