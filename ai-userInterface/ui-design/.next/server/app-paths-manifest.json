@@ -1,8 +1,8 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/branding/page": "app/branding/page.js",
-  "/cloud-automation/azure-terraform-migrate/page": "app/cloud-automation/azure-terraform-migrate/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/workflow-builder/page": "app/workflow-builder/page.js",
   "/page": "app/page.js",
-  "/cloud-automation/page": "app/cloud-automation/page.js",
-  "/cybersecurity/page": "app/cybersecurity/page.js"
+  "/cloud-automation/azure-terraform-migrate/page": "app/cloud-automation/azure-terraform-migrate/page.js",
+  "/cybersecurity/threat-detection/page": "app/cybersecurity/threat-detection/page.js",
+  "/cybersecurity/[productId]/page": "app/cybersecurity/[productId]/page.js"
 }
