@@ -37,8 +37,8 @@ yarn-error.log*
 next-env.d.ts
 
 # prompts and configuration files
-prompts/
-*.yaml
-*.yml
-prompt-*.yml
-prompt-*.yaml
+#prompts/
+#*.yaml
+#*.yml
+#prompt-*.yml
+#prompt-*.yaml

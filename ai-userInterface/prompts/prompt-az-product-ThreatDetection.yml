@@ -1,0 +1,70 @@
+Create a modern, enterprise-grade Next.js module for a new product under the "Cybersecurity Agents" category. The product name is "nextGen-ThreatDetection". This module must integrate seamlessly into the existing multi-agent dashboard architecture and follow all open-source UI/UX requirements.
+
+Business Context:
+The CyberThreatDetection Agent is an agentic AI solution designed for Azure cloud environments. It receives input from Security Operations (SecOps) teams or automated security prompts. Based on the input, the agent connects to Azure and performs a full security scan. The workflow includes:
+- Anomaly Detection Agents
+- Malware Signature Scanning
+- Threat Intelligence Correlation
+- Azure Resource Security Posture Evaluation
+- Identity & Access Misconfiguration Detection
+- Log Pattern Analysis
+- Suspicious Activity Timeline Reconstruction
+
+UI/UX Requirements:
+1. Use Next.js (App Router preferred) with ONLY open-source UI frameworks such as Tailwind CSS or Bootstrap 5.
+2. Create a dedicated product page under the "Cybersecurity Agents" category.
+3. Include a clean, enterprise-grade layout with:
+   - Product Overview Section
+   - Azure Connection Status Panel
+   - Threat Scan Controls
+   - Real-time Scan Results
+   - Anomaly Detection Summary
+   - Malware Signature Findings
+   - Security Recommendations Panel
+4. Add a large Natural Language Processing (NLP) input box:
+   - A full-width, multi-line text area for SecOps teams to enter detailed natural-language instructions.
+   - Include placeholder text such as: "Describe the security concern, incident, or Azure resource to analyze..."
+   - Add a microphone icon button for voice input.
+   - Implement voice support using open-source browser APIs (Web Speech API) or other free libraries.
+5. Implement dynamic customization features:
+   - Toggle to enable/disable this product.
+   - Ability to hide/show this product from the category.
+   - Dynamic header text and logo (open-source only).
+   - Theme switching (light/dark/custom themes).
+6. Design a sidebar entry for this product under "Cybersecurity Agents".
+7. Use modern UI elements: cards, badges, alerts, tables, toggles, dropdowns, progress bars, modal dialogs.
+8. Include placeholder data and dummy charts using open-source libraries like Chart.js or ApexCharts.
+9. Add a workflow visualization section showing:
+   - Input from SecOps (text or voice)
+   - Azure authentication
+   - Anomaly Detection Agent execution
+   - Malware Signature Agent execution
+   - Result aggregation
+   - Final threat score
+10. Ensure all navigation links work using Next.js routing.
+11. Ensure responsive design for desktop, tablet, and mobile.
+12. Follow accessibility best practices (ARIA roles, alt text, keyboard navigation).
+13. Use only open-source icons (Heroicons, Font Awesome Free).
+14. No proprietary libraries, no paid UI kits, no licensed assets.
+15. Add comments explaining where backend GenAI + Azure agentic logic will be integrated.
+
+Functional Requirements:
+1. Create UI components for:
+   - Azure connection input (subscription ID, tenant ID, resource group)
+   - Large NLP input box for natural-language instructions
+   - Voice input button (microphone) with speech-to-text support
+   - Triggering a threat scan
+   - Viewing scan progress
+   - Viewing anomaly detection results
+   - Viewing malware signature matches
+   - Viewing recommended remediation steps
+2. Include mock API routes in Next.js to simulate:
+   - Azure connection validation
+   - Threat scan initiation
+   - Anomaly detection output
+   - Malware signature scan output
+3. Include a product-level toggle to activate/deactivate this agent.
+4. Ensure the product can be sold individually and behaves as a standalone module.
+
+Goal:
+Generate a visually appealing, modular, and enterprise-grade Next.js product module for the CyberThreatDetection Agent. The UI must support natural-language input, voice input, Azure-based agentic workflows, dynamic visibility controls, customizable branding, and real-time threat detection visualization — all built exclusively with open-source, zero-cost UI/UX frameworks and tools.
