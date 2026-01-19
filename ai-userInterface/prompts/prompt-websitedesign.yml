@@ -1,0 +1,42 @@
+Create a modern, responsive Next.js application for a GenAI and Agentic AI product dashboard. The platform includes modular agents sold as individual products. The top-level categories are:
+1. Cybersecurity Agent
+2. Cloud Automation Agent
+3. Workflow Builder
+Initaly use ui-design foldr to create the following structure:- pages/
+  - _app.js
+Each category contains multiple products. Each category and each product must be dynamically shown or hidden based on a toggle switch. The design must follow the latest UI/UX principles and use only 100% open-source, free-to-use tools and frameworks. No paid, licensed, or proprietary UI components are allowed.
+
+Requirements:
+1. Use Next.js (App Router preferred) with ONLY open-source UI frameworks such as Tailwind CSS or Bootstrap 5.
+2. Build a clean, enterprise-grade layout with modular sections for each agent category and its products.
+3. Include a top navigation bar with branding ("AI-a NextGenTech") and tagline ("Where AI Meets Enterprise Innovation").
+4. Implement dynamic customization features:
+   - Allow users to change the company logo (upload or choose from predefined open-source options).
+   - Allow users to change the header text dynamically.
+   - Enable theme switching (light/dark/custom themes) using open-source theme utilities.
+5. Implement category and product visibility controls:
+   - Each top-level category must have a toggle to hide/show the entire category.
+   - Each product inside a category must have its own toggle to hide/show that product.
+   - The UI should update instantly when toggles are changed.
+6. Design a sidebar with icons and labels for:
+   - Dashboard
+   - Cybersecurity Agent
+   - Cloud Automation Agent
+   - Workflow Builder
+   - Settings
+   - Theme & Branding
+   Use only open-source icon libraries (e.g., Heroicons, Font Awesome Free).
+7. Ensure all navigation links are fully functional using Next.js routing.
+8. Create individual content panels for each category and its products:
+   - Cybersecurity Agent: threat detection summary, agent status, recent alerts.
+   - Cloud Automation Agent: migration progress, automation triggers, cloud health metrics.
+   - Workflow Builder: drag-and-drop workflow components, agent orchestration steps, execution logs.
+9. Use modern UI elements such as cards, badges, toggles, dropdowns, progress bars, and modal dialogs — all from open-source libraries only.
+10. Include placeholder data and dummy charts using open-source charting libraries like Chart.js or ApexCharts (free version only).
+11. Ensure responsive layout for mobile and desktop views.
+12. Follow semantic HTML structure with accessibility best practices (ARIA roles, alt text, keyboard navigation).
+13. Use only open-source, Next.js-compatible tools for styling, charts, icons, and UI components. No paid themes, no commercial UI kits, no licensed assets.
+14. Include comments in the code to guide future integration with GenAI backend services and agentic orchestration workflows.
+
+Goal:
+Generate a visually appealing, modular, and scalable Next.js interface that supports selling each agent as an individual product. The UI must allow dynamic visibility control of categories and products, customizable branding, and enterprise-grade usability — all built exclusively with open-source, zero-cost UI/UX frameworks and tools.
