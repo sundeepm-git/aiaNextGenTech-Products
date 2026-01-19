@@ -1,3 +1,79 @@
+# ai-userInterface / ui-design
+
+This project is a Next.js web application with custom branding, AI-themed animations, and a modern sidebar navigation. It uses Tailwind CSS for styling and supports persistent logo/header uploads.
+
+## Features
+- Next.js app with file-based routing
+- Tailwind CSS with custom keyframes/animations
+- Dynamic branding (logo, header, company name)
+- AI-inspired animated header and logo
+- Sidebar with expandable/collapsible menus
+- Persistent branding via localStorage and file upload
+- Cross-browser compatibility (Chrome, Firefox, Edge)
+
+## Getting Started
+
+### Prerequisites
+- Node.js (v16 or higher recommended)
+- npm (comes with Node.js)
+- Git
+
+### Installation
+1. **Clone the repository:**
+    ```
+    git clone <repository-url>
+    cd ai-userInterface/ui-design
+    ```
+2. **Install dependencies:**
+    ```
+    npm install
+    ```
+
+### Running the App
+- **Development mode:**
+   ```
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+- **Production build:**
+   ```
+   npm run build
+   npm start
+   ```
+
+### Project Structure
+- `app/` - Next.js app directory (pages, API routes, branding, etc.)
+- `components/` - Reusable React components (Navbar, Sidebar, Cards, Charts)
+- `context/` - React context for global state (branding, etc.)
+- `public/img/` - Static images (logo, header)
+- `styles/` - Global CSS (Tailwind, custom styles)
+- `prompts/` - Prompt YAML files for AI workflows
+
+### Key Dependencies
+- next
+- react
+- react-dom
+- tailwindcss
+- postcss
+- autoprefixer
+
+See `package.json` for the full list.
+
+### Useful Commands
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm start` - Start production server
+- `npm install <package>` - Add a new dependency
+- `npm uninstall <package>` - Remove a dependency
+
+### Troubleshooting
+- Delete `node_modules` and `package-lock.json` if you have install issues, then run `npm install` again.
+- Ensure your Node.js version matches the required version.
+
+---
+
+For detailed Git and npm command usage, see [GIT_NPM_COMMANDS.md](GIT_NPM_COMMANDS.md).
 # GenAI Agent Dashboard
 
 A modern, responsive Next.js application for GenAI and Agentic AI product dashboard.
