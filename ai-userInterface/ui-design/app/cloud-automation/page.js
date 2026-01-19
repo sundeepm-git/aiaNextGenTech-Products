@@ -156,14 +156,30 @@ export default function CloudAutomationPage() {
         {/* Future integration: Live automation execution logs */}
       </div>
 
-      {/* Products */}
+      {/* Products - Azure */}
       <CategoryCard
-        title="Cloud Automation Products"
+        title="Azure Cloud"
         icon={CloudIcon}
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {getVisibleProducts('cloudAutomation').map((product) => (
-            <ProductCard key={product.id} product={product} status="active" />
+          {getVisibleProducts('cloudAutomation')
+            .filter(product => !product.provider || product.provider === 'azure')
+            .map((product) => (
+              <ProductCard key={product.id} product={product} status="active" />
+          ))}
+        </div>
+      </CategoryCard>
+
+      {/* Products - GCP */}
+      <CategoryCard
+        title="Google Cloud Platform (GCP)"
+        icon={CloudIcon}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {getVisibleProducts('cloudAutomation')
+            .filter(product => product.provider === 'gcp')
+            .map((product) => (
+              <ProductCard key={product.id} product={product} status="active" />
           ))}
         </div>
       </CategoryCard>

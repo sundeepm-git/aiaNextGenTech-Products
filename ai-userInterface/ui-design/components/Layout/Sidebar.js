@@ -6,6 +6,7 @@ import {
   HomeIcon,
   ShieldCheckIcon,
   CloudIcon,
+  CpuChipIcon,
   CogIcon,
   PaintBrushIcon,
   Bars3Icon,
@@ -48,12 +49,12 @@ const Sidebar = () => {
       icon: CloudIcon,
       visible: categories.cloudAutomation.visible,
       categoryKey: 'cloudAutomation',
-      hasSubmenu: false,
+      hasSubmenu: true,
     },
     { 
       name: categories.workflowBuilder.name, 
       href: '/workflow-builder', 
-      icon: CogIcon,
+      icon: CpuChipIcon,
       visible: categories.workflowBuilder.visible,
       categoryKey: 'workflowBuilder',
       hasSubmenu: false,
@@ -77,25 +78,37 @@ const Sidebar = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 z-30 transition-transform duration-300 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0 w-64`}
+        className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 z-30 transition-all duration-300 ${
+          sidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0 lg:w-16'
+        }`}
         role="navigation"
         aria-label="Main navigation"
       >
         <div className="flex flex-col h-full">
-          {/* Close button for mobile */}
-          <div className="flex items-center justify-between p-4 lg:hidden">
-            <span className="text-lg font-semibold text-gray-900 dark:text-white">
-              Menu
-            </span>
-            <button
-              onClick={toggleSidebar}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-              aria-label="Close sidebar"
-            >
-              <XMarkIcon className="h-6 w-6" />
-            </button>
+          {/* Header with collapse button */}
+          <div className="flex items-center justify-between p-4">
+            {sidebarOpen ? (
+              <>
+                <div className="flex items-center justify-center p-1">
+                  <Bars3Icon className="h-6 w-6 text-gray-900 dark:text-white" />
+                </div>
+                <button
+                  onClick={toggleSidebar}
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  aria-label="Collapse sidebar"
+                >
+                  <ChevronDownIcon className="h-5 w-5 transform rotate-[-90deg]" />
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={toggleSidebar}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors mx-auto"
+                aria-label="Expand sidebar"
+              >
+                <ChevronRightIcon className="h-5 w-5" />
+              </button>
+            )}
           </div>
 
           {/* Navigation links */}
@@ -112,15 +125,20 @@ const Sidebar = () => {
                       href={item.href}
                       className={`flex-1 flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                         isActive
-                          ? 'bg-primary text-white'
+                          ? (item.categoryKey === 'cybersecurity' 
+                              ? 'bg-gradient-to-r from-red-400 to-yellow-400 text-white' 
+                              : item.categoryKey === 'cloudAutomation'
+                              ? 'bg-gradient-to-r from-blue-400 to-cyan-400 text-white'
+                              : 'bg-primary text-white')
                           : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                       }`}
                       aria-current={isActive ? 'page' : undefined}
+                      title={!sidebarOpen ? item.name : undefined}
                     >
                       <Icon className="h-6 w-6 flex-shrink-0" aria-hidden="true" />
-                      <span className="font-medium">{item.name}</span>
+                      {sidebarOpen && <span className="font-medium">{item.name}</span>}
                     </Link>
-                    {item.hasSubmenu && (
+                    {item.hasSubmenu && sidebarOpen && (
                       <button
                         onClick={() => toggleCategory(item.categoryKey)}
                         className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
@@ -136,28 +154,89 @@ const Sidebar = () => {
                   </div>
 
                   {/* Submenu for products */}
-                  {item.hasSubmenu && isExpanded && item.categoryKey && (
+                  {item.hasSubmenu && isExpanded && item.categoryKey && sidebarOpen && (
                     <div className="ml-6 mt-1 space-y-1">
-                      {products[item.categoryKey]
-                        ?.filter(product => product.visible)
-                        .map(product => {
-                          const productRoute = product.route || `/${item.categoryKey}/${product.id}`;
-                          const isProductActive = pathname === productRoute;
-                          
-                          return (
-                            <Link
-                              key={product.id}
-                              href={productRoute}
-                              className={`block px-4 py-2 text-sm rounded-lg transition-colors ${
-                                isProductActive
-                                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                              }`}
-                            >
-                              {product.name}
-                            </Link>
-                          );
-                        })}
+                      {item.categoryKey === 'cloudAutomation' ? (
+                        <>
+                          {/* Azure Products */}
+                          <div className="flex items-center gap-2 px-4 py-2 mt-4 mb-2">
+                             <div className="h-0.5 flex-1 rounded-full opacity-30" style={{ backgroundColor: 'var(--color-accent)' }}></div>
+                             <span className="text-base font-bold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--color-accent)' }}>Azure Cloud</span>
+                             <div className="h-0.5 flex-1 rounded-full opacity-30" style={{ backgroundColor: 'var(--color-accent)' }}></div>
+                          </div>
+                          {products[item.categoryKey]
+                            ?.filter(product => product.visible && (!product.provider || product.provider === 'azure'))
+                            .map(product => {
+                              const productRoute = product.route || `/${item.categoryKey}/${product.id}`;
+                              const isProductActive = pathname === productRoute;
+                              
+                              return (
+                                <Link
+                                  key={product.id}
+                                  href={productRoute}
+                                  style={isProductActive ? { backgroundColor: 'var(--bg-hover)', color: 'var(--color-accent)' } : {}}
+                                  className={`block px-4 py-2 text-sm rounded-lg transition-colors ${
+                                    isProductActive
+                                      ? 'font-bold'
+                                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                  }`}
+                                >
+                                  {product.name}
+                                </Link>
+                              );
+                            })}
+
+                          {/* GCP Products */}
+                          <div className="flex items-center gap-2 px-4 py-2 mt-6 mb-2">
+                             <div className="h-0.5 flex-1 rounded-full opacity-30" style={{ backgroundColor: 'var(--color-accent)' }}></div>
+                             <span className="text-base font-bold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--color-accent)' }}>GCP Cloud</span>
+                             <div className="h-0.5 flex-1 rounded-full opacity-30" style={{ backgroundColor: 'var(--color-accent)' }}></div>
+                          </div>
+                          {products[item.categoryKey]
+                            ?.filter(product => product.visible && product.provider === 'gcp')
+                            .map(product => {
+                              const productRoute = product.route || `/${item.categoryKey}/${product.id}`;
+                              const isProductActive = pathname === productRoute;
+                              
+                              return (
+                                <Link
+                                  key={product.id}
+                                  href={productRoute}
+                                  style={isProductActive ? { backgroundColor: 'var(--bg-hover)', color: 'var(--color-accent)' } : {}}
+                                  className={`block px-4 py-2 text-sm rounded-lg transition-colors ${
+                                    isProductActive
+                                      ? 'font-bold'
+                                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                  }`}
+                                >
+                                  {product.name}
+                                </Link>
+                              );
+                            })}
+                        </>
+                      ) : (
+                        products[item.categoryKey]
+                          ?.filter(product => product.visible)
+                          .map(product => {
+                            const productRoute = product.route || `/${item.categoryKey}/${product.id}`;
+                            const isProductActive = pathname === productRoute;
+                            
+                            return (
+                              <Link
+                                key={product.id}
+                                href={productRoute}
+                                style={isProductActive ? { backgroundColor: 'var(--bg-hover)', color: 'var(--color-accent)' } : {}}
+                                className={`block px-4 py-2 text-sm rounded-lg transition-colors ${
+                                  isProductActive
+                                    ? 'font-bold'
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                }`}
+                              >
+                                {product.name}
+                              </Link>
+                            );
+                          })
+                      )}
                     </div>
                   )}
                 </div>
@@ -166,13 +245,15 @@ const Sidebar = () => {
           </nav>
 
           {/* Footer */}
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-              © 2026 AI-a NextGenTech
-              <br />
-              Open Source Dashboard
-            </p>
-          </div>
+          {sidebarOpen && (
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                © 2026 AI-a NextGenTech
+                <br />
+                Open Source Dashboard
+              </p>
+            </div>
+          )}
         </div>
       </aside>
 

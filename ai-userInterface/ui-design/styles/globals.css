@@ -2,49 +2,251 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 249, 250, 251;
-  --background-end-rgb: 255, 255, 255;
-}
+@layer base {
+  :root {
+    /* DEFAULT LIGHT THEME */
+    --bg-page-start: #f8fafc;
+    --bg-page-end: #f1f5f9;
+    --bg-card: #ffffff;
+    --bg-subtle: #f8fafc;
+    --bg-hover: #f1f5f9;
+    --text-main: #0f172a;
+    --text-muted: #475569;
+    --border-main: #e2e8f0;
+    --color-accent: #2563eb; /* Primary Blue for Light Mode */
+    --color-secondary: #7c3aed; /* Purple */
+  }
 
-.dark {
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 17, 24, 39;
-  --background-end-rgb: 31, 41, 55;
+  .dark {
+    --bg-page-start: #0f172a;
+    --bg-page-end: #1e293b;
+    --bg-card: #1e293b;
+    --bg-subtle: #0f172a;
+    --bg-hover: #334155;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --border-main: #334155;
+    --color-accent: #60a5fa; /* Light Blue for Dark Mode */
+    --color-secondary: #8b5cf6; /* Light Purple for Dark Mode */
+  }
+
+  /* Amazon - Rich Warm Espresso with Orange Accent */
+  .amazon {
+    --bg-page-start: #2e2621;
+    --bg-page-end: #1f1915;
+    --bg-card: #3d322c; /* Warm Dark Brown */
+    --bg-subtle: #4d4038;
+    --bg-hover: #5e4e45;
+    --text-main: #fff8eb;
+    --text-muted: #d6ccc2;
+    --border-main: #fbbf24; /* Amazon Orange/Gold */
+    --color-accent: #fbbf24;
+    --color-secondary: #d97706; /* Amber */
+  }
+
+  /* Ocean Blue - Vibrant Azure & Sky Gradient */
+  .meta {
+    --bg-page-start: #003366; /* Deep Ocean */
+    --bg-page-end: #005299;   /* Vibrant Azure */
+    --bg-card: #004080;       /* Rich Blue Card */
+    --bg-subtle: #0059b3;     /* Lighter Blue Hover */
+    --bg-hover: #0066cc;      /* Sky Blue Hover */
+    --text-main: #ffffff;
+    --text-muted: #e6f2ff;
+    --border-main: #33adff;   /* Bright Sky Accent */
+    --color-accent: #33adff;
+    --color-secondary: #0ea5e9; /* Sky Blue */
+  }
+
+  /* Microsoft Style - Sleek Metro Dark */
+  .corporate {
+    --bg-page-start: #202020;
+    --bg-page-end: #121212;
+    --bg-card: #2b2b2b;
+    --bg-subtle: #3a3a3a;
+    --bg-hover: #4f4f4f;
+    --text-main: #ffffff;
+    --text-muted: #a3a3a3;
+    --border-main: #00a4ef; /* Metro Blue Accent */
+    --color-accent: #00a4ef;
+    --color-secondary: #0284c7; /* Darker Blue */
+  }
+
+  /* AT&T Style - Tech Blue-Black */
+  .slate-pro {
+    --bg-page-start: #001e3c; /* Deep Ink Blue */
+    --bg-page-end: #000e1f;
+    --bg-card: #0a2e52;
+    --bg-subtle: #143d69;
+    --bg-hover: #1e4d7d;
+    --text-main: #f0f9ff;
+    --text-muted: #bae6fd;
+    --border-main: #00a8e0;
+    --color-accent: #00a8e0;
+    --color-secondary: #0369a1; /* Darker Sky */
+  }
+
+  /* Siemens/Medical - Deep Teal */
+  .teal-tech {
+    --bg-page-start: #042f2e;
+    --bg-page-end: #022c22;
+    --bg-card: #115e59;
+    --bg-subtle: #134e4a;
+    --bg-hover: #14b8a6;
+    --text-main: #f0fdfa;
+    --text-muted: #ccfbf1;
+    --border-main: #2dd4bf;
+    --color-accent: #2dd4bf;
+    --color-secondary: #0f766e; /* Dark Teal */
+  }
+
+  /* FedEx/Roku - Royal Purple */
+  .purple-enterprise {
+    --bg-page-start: #3b0764;
+    --bg-page-end: #2e1065;
+    --bg-card: #581c87;
+    --bg-subtle: #6b21a8;
+    --bg-hover: #7e22ce;
+    --text-main: #faf5ff;
+    --text-muted: #e9d5ff;
+    --border-main: #d8b4fe;
+    --color-accent: #d8b4fe;
+    --color-secondary: #9333ea; /* Purple 600 */
+  }
+
+  /* Whole Foods/HEB - Fresh Green */
+  .olive-moss {
+    --bg-page-start: #14532d;
+    --bg-page-end: #052e16;
+    --bg-card: #166534;
+    --bg-subtle: #15803d;
+    --bg-hover: #16a34a;
+    --text-main: #f0fdf4;
+    --text-muted: #bbf7d0;
+    --border-main: #4ade80;
+    --color-accent: #4ade80;
+    --color-secondary: #166534; /* Dark Green */
+  }
+
+  /* Walmart - Vibrant Ocean Blue */
+  .navy-pro {
+    --bg-page-start: #003366; /* Deep Walmart Blue */
+    --bg-page-end: #002244;
+    --bg-card: #004c99;
+    --bg-subtle: #0059b3;
+    --bg-hover: #0071ce;
+    --text-main: #ffffff;
+    --text-muted: #e0f2fe;
+    --border-main: #ffc220; /* Spark Yellow Accent */
+    --color-accent: #ffc220;
+    --color-secondary: #eab308; /* Yellow 500 */
+  }
+
+  /* Verizon - High Contrast Black/Red */
+  .charcoal {
+    --bg-page-start: #000000;
+    --bg-page-end: #1a1a1a;
+    --bg-card: #1c1c1c;
+    --bg-subtle: #333333;
+    --bg-hover: #4d4d4d;
+    --text-main: #ffffff;
+    --text-muted: #d4d4d4;
+    --border-main: #cd040b; /* Verizon Red Accent */
+    --color-accent: #ef4444; /* Brighter Red for text visibility */
+    --color-secondary: #b91c1c; /* Red 700 */
+  }
+
+  /* CVS/Target - Warm Burgundy/Red */
+  .warm-beige {
+    --bg-page-start: #450a0a; /* Deep Red */
+    --bg-page-end: #450a0a;
+    --bg-card: #7f1d1d;
+    --bg-subtle: #991b1b;
+    --bg-hover: #b91c1c;
+    --text-main: #fef2f2;
+    --text-muted: #fecaca;
+    --border-main: #f87171;
+    --color-accent: #fca5a5; /* Lighter Red/Pink for text visibility */
+    --color-secondary: #f87171; /* Red 400 */
+  }
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  background: linear-gradient(to bottom, var(--bg-page-start), var(--bg-page-end));
+  color: var(--text-main);
+  min-height: 100vh;
 }
 
-/* Custom scrollbar */
+/* Global Component Overrides to Enforce Theme Variables */
+/* This ensures that Tailwind classes map to our semantic variables */
+.bg-white, .bg-gray-50, .bg-gray-100, .bg-slate-50, .dark\:bg-gray-800, .dark\:bg-gray-900, .dark\:bg-gray-800\/50  {
+  background-color: var(--bg-card) !important;
+}
+
+.bg-gray-100, .hover\:bg-gray-100:hover, .hover\:bg-gray-200:hover, .bg-gray-200, .bg-gray-50 {
+  background-color: var(--bg-subtle) !important;
+}
+
+.text-gray-900, .text-gray-800, .text-gray-700, .dark\:text-white, .text-slate-900 {
+  color: var(--text-main) !important;
+}
+
+.text-gray-600, .text-gray-500, .text-gray-400, .dark\:text-gray-400, .text-slate-600 {
+  color: var(--text-muted) !important;
+}
+
+.border-gray-200, .border-gray-300, .border-gray-100, .dark\:border-gray-700, .dark\:border-gray-600 {
+  border-color: var(--border-main) !important;
+}
+
+/* Fix specific UI elements */
+input, select, textarea {
+  background-color: var(--bg-subtle) !important;
+  color: var(--text-main) !important;
+  border-color: var(--border-main) !important;
+}
+
+/* Theme Previews for Navbar */
+.theme-preview-amazon { background-color: #2e2621; }
+.theme-preview-meta { background-color: #005299; }
+.theme-preview-corporate { background-color: #202020; }
+.theme-preview-slate-pro { background-color: #001e3c; }
+.theme-preview-teal-tech { background-color: #042f2e; }
+.theme-preview-purple-enterprise { background-color: #3b0764; }
+.theme-preview-olive-moss { background-color: #14532d; }
+.theme-preview-navy-pro { background-color: #003366; }
+.theme-preview-charcoal { background-color: #000000; }
+.theme-preview-warm-beige { background-color: #7f1d1d; }
+
+/* Navbar specific fixes */
+header, nav {
+  background-color: var(--bg-page-start) !important;
+  border-bottom-color: var(--border-main) !important;
+}
+
+/* Sidebar specific fixes */
+aside {
+  background-color: var(--bg-page-end) !important;
+  border-right-color: var(--border-main) !important;
+}
+
+/* Scrollbar theming */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-100 dark:bg-gray-800;
+  background-color: var(--bg-subtle);
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+  background-color: var(--border-main);
+  border-radius: 9999px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400 dark:bg-gray-500;
-}
-
-/* Smooth transitions */
 * {
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 /* Focus styles for accessibility */
