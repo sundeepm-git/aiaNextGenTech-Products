@@ -308,15 +308,53 @@ If the tool fails, return {"status":"failed","message":"<brief>"} only.
 #### 7) Test the agent, then add to a Workflow
 Agent test: Use the agent playground → provide subscriptionId, resourceGroups[], optional outPath → run. Approve the tool call if prompted. Should return JSON with .xlsx + .pdf. (If RBAC errors, grant Reader to the identity in Azure.)
 Workflow: Build → Workflows → Create → Sequential → Save. Add:
-  - Node 1: NLP agent (extracts inputs) → Save agent output as Local.orchestratorOutput
-  - Node 2: Assessment agent:
-    - subscriptionId = {{Local.orchestratorOutput.subscriptionId}}
-    - resourceGroups = {{Local.orchestratorOutput.resourceGroups}}
-    - outPath        = {{Local.orchestratorOutput.outPath}}
-    - Save agent output as Local.assessmentOutput
-    - Downstream nodes can use:
-      - {{Local.assessmentOutput.artifacts.xlsx}}
-      - {{Local.assessmentOutput.artifacts.pdf}}
+
+---
+
+### Node 1 — MigrationOrchestrator-Agent (Input Extraction & Routing)
+**Purpose:**
+Extracts and validates user migration requirements from a natural language prompt or structured input. Parses subscription, resource group(s), and output path, then sets these as workflow variables for downstream nodes.
+
+**Details:**
+- Receives user input (NLP or form-based)
+- Extracts: subscriptionId, resourceGroups[], outPath
+- Validates required fields and formats
+- Saves output as `Local.orchestratorOutput` for use by subsequent nodes
+- Example output:
+  ```json
+  {
+    "subscriptionId": "<sub-guid>",
+    "resourceGroups": ["rg-app-dev", "rg-data-dev"],
+    "outPath": "/assessment"
+  }
+  ```
+
+---
+
+### Node 2 — Assessment Agent (infraAzTfAssessmentAgent-v1, MCP-Connected)
+**Purpose:**
+Performs a managed-only Azure resource assessment for the specified subscription and resource groups, using a remote/local MCP server. Generates .xlsx and .pdf reports for downstream processing.
+
+**Details:**
+- Receives variables from Node 1: `subscriptionId`, `resourceGroups`, `outPath`
+- Calls the MCP tool `execute_powershell_assessment` (see implementation below)
+- Waits for tool completion and returns JSON with artifact paths
+- Saves output as `Local.assessmentOutput` for downstream use
+- Example output:
+  ```json
+  {
+    "status": "completed",
+    "subscriptionId": "<sub-guid>",
+    "outPath": "/assessment",
+    "artifacts": {
+      "xlsx": "/assessment/AzTfExport_Managed_RG_Report.xlsx",
+      "pdf": "/assessment/AzTfExport_Managed_RG_Report.pdf"
+    }
+  }
+  ```
+- Downstream nodes (export, refactor, etc.) reference these artifact paths
+
+---
 
 Click Run Workflow. (Designer creation/saving/running per New Foundry docs.)
 
