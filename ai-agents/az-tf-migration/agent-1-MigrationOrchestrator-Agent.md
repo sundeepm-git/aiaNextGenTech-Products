@@ -5,7 +5,7 @@ Extracts and validates user migration requirements from a natural language promp
 
 ## Details
 - Receives user input (NLP or form-based)
-- Extracts: subscriptionId, resourceGroups[], outPath
+- Extracts: subscriptionId, resourceGroups[]
 - Validates required fields and formats
 - Saves output as `Local.orchestratorOutput` for use by subsequent nodes
 
