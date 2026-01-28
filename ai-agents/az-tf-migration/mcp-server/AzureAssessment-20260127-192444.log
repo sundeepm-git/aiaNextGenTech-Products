@@ -1,0 +1,8 @@
+[2026-01-27T19:24:44.3011461-06:00] [INFO ] Log started (auto-init).
+[2026-01-27T19:24:44.3011461-06:00] [INFO] START: Resolve repository root (nearest 'hca-powershell-exports')
+[2026-01-27T19:24:44.3741287-06:00] [SUCCESS] DONE : Resolve repository root (nearest 'hca-powershell-exports')
+[2026-01-27T19:24:44.4310141-06:00] [INFO] START: Create report directory 'C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\report'
+[2026-01-27T19:24:44.5221152-06:00] [SUCCESS] DONE : Create report directory 'C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\report'
+[2026-01-27T19:24:44.5287148-06:00] [INFO] START: Clean up existing reports in 'C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\report'
+[2026-01-27T19:24:44.6319868-06:00] [SUCCESS] DONE : Clean up existing reports in 'C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\report'
+[2026-01-27T19:24:44.6369060-06:00] [INFO] START: Initialize log context

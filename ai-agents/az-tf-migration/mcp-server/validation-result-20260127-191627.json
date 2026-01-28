@@ -1,0 +1,68 @@
+{
+  "RequiredPermissions": [
+    {
+      "Role": "Reader",
+      "Description": "Minimum required role to list resource groups and resources",
+      "Scope": "Subscription Level"
+    }
+  ],
+  "Errors": [],
+  "Timestamp": "2026-01-27T19:15:58.2362543-06:00",
+  "Recommendations": [],
+  "Status": "Failed",
+  "ValidationChecks": [
+    {
+      "Required": "7.0 or higher",
+      "Message": "PowerShell version check passed: 7.5.4",
+      "Name": "PowerShell Version",
+      "Status": "Pass",
+      "Actual": "7.5.4"
+    },
+    {
+      "Required": "Installed",
+      "Message": "Az.Accounts module found: 2.11.1",
+      "Name": "Az.Accounts Module",
+      "Status": "Pass",
+      "Actual": "Version 2.11.1"
+    },
+    {
+      "Required": "Installed",
+      "Message": "ImportExcel module found: 7.8.10",
+      "Name": "ImportExcel Module",
+      "Status": "Pass",
+      "Actual": "Version 7.8.10"
+    },
+    {
+      "Required": "Authenticated",
+      "Message": "Authenticated as sun.study29@gmail.com in tenant a0e1f124-d84e-4ef7-bf4b-926b60443fb9",
+      "Name": "Azure Authentication",
+      "Status": "Pass",
+      "Actual": "Authenticated as sun.study29@gmail.com"
+    },
+    {
+      "Required": "Accessible",
+      "Message": "Successfully accessed subscription: Enterprise-Enrollment-Subscription (d0f1884d-1f98-4bf1-9e15-e2986fc1bca2)",
+      "Name": "Subscription Access",
+      "Status": "Pass",
+      "Actual": "Accessible: Enterprise-Enrollment-Subscription"
+    },
+    {
+      "Required": "Accessible",
+      "Message": "Cannot access resource group 'rg-genai-infra-0014': The SSL connection could not be established, see inner exception.",
+      "Name": "Resource Group Access: rg-genai-infra-0014",
+      "Status": "Fail",
+      "Actual": "Not Accessible"
+    },
+    {
+      "Required": "Reader or higher",
+      "Message": "Successfully verified read access to subscription resources",
+      "Name": "RBAC Role Verification",
+      "Status": "Pass",
+      "Actual": "Sufficient permissions"
+    }
+  ],
+  "Warnings": [
+    "Cannot access resource group 'rg-genai-infra-0014': The SSL connection could not be established, see inner exception."
+  ],
+  "MissingModules": []
+}

@@ -1,6 +1,7 @@
 import express from "express";
-import { spawn } from "child_process";
+import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
@@ -8,132 +9,139 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-console.log('Loaded script path:', process.env.POWERSHELL_SCRIPT_PATH);
+// Simple log function
+function log(message) {
+  const logDir = path.join(__dirname, "../../log");
+  const logFile = path.join(logDir, "server.log");
+  const timestamp = new Date().toISOString();
+  const entry = `[${timestamp}] ${message}\n`;
+  try {
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    fs.appendFileSync(logFile, entry);
+  } catch (err) {
+    console.error("Failed to write log:", err);
+  }
+}
+
+const discoveryResponse = {
+  tools: [
+    {
+      name: "execute_powershell_assessment",
+      description: "Runs the PowerShell assessment for Azure to Terraform migration",
+      inputSchema: {
+        type: "object",
+        required: ["subscriptionId", "resourceGroup"],
+        properties: {
+          subscriptionId: { type: "string" },
+          resourceGroup: { type: "string" }
+        },
+        additionalProperties: false
+      }
+    }
+  ]
+};
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-// ---- MCP discovery: what tools we expose ----
+// ---- MCP DISCOVERY ENDPOINTS ----
 app.get("/assessment-ps/mcp", (req, res) => {
-  res.json({
-    tools: [
-      {
-        name: "execute_powershell_assessment",
-        inputSchema: {
-          type: "object",
-          required: ["subscriptionId", "resourceGroups"],
-          properties: {
-            subscriptionId: { type: "string" },
-            resourceGroups: {
-              type: "array",
-              items: { type: "string" },
-              minItems: 1
-            }
-          },
-          additionalProperties: false
-        },
-        outputSchema: {
-          type: "object",
-          required: ["status", "artifacts"],
-          properties: {
-            status: { type: "string", enum: ["completed", "failed"] },
-            subscriptionId: { type: "string" },
-            outPath: { type: "string" },
-            artifacts: {
-              type: "object",
-              required: ["xlsx", "pdf"],
-              properties: {
-                xlsx: { type: "string" },
-                pdf: { type: "string" }
-              },
-              additionalProperties: false
-            },
-            message: { type: "string" }
-          },
-          additionalProperties: false
-        }
-      }
-    ]
-  });
+  log("GET /assessment-ps/mcp");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).json(discoveryResponse);
 });
 
-// ---- MCP tool invocation ----
-app.post("/tools/execute_powershell_assessment", (req, res) => {
+app.post("/assessment-ps/mcp", (req, res) => {
+  log("POST /assessment-ps/mcp");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).json(discoveryResponse);
+});
+
+// ---- MCP TOOL EXECUTION ----
+app.post("/mcp/tools/execute_powershell_assessment", (req, res) => {
+  log("POST /mcp/tools/execute_powershell_assessment");
+
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Connection", "keep-alive");
+
   const body = req.body || {};
-  const subscriptionId = (body.subscriptionId || "").trim();
-  const resourceGroups = Array.isArray(body.resourceGroups) ? body.resourceGroups : [];
+  const subscriptionId = (body.subscriptionId || body.params?.arguments?.subscriptionId || "").trim();
+  const resourceGroup = (body.resourceGroup || body.params?.arguments?.resourceGroup || "").trim();
 
-  if (!subscriptionId || resourceGroups.length === 0) {
-    return res.status(400).json({
-      status: "failed",
-      message: "subscriptionId (string) and resourceGroups (non-empty array) are required"
-    });
+  if (!subscriptionId || !resourceGroup) {
+    log("400: Missing input data");
+    return res.status(400).end(JSON.stringify({ status: "failed", message: "subscriptionId and resourceGroup required" }));
   }
 
-  // Build PowerShell call using script path from .env
   const scriptPath = process.env.POWERSHELL_SCRIPT_PATH;
-  if (!scriptPath) {
-    return res.status(500).json({
-      status: "failed",
-      message: "PowerShell script path is not set in .env file."
-    });
-  }
-  const rgCsv = resourceGroups.join(",");
+  const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(" "); }, 15000);
 
-  let ps;
-  try {
-    ps = spawn("pwsh", [
-      "-NoLogo",
-      "-NonInteractive",
-      "-File", scriptPath,
-      "-SubscriptionId", subscriptionId,
-      "-ResourceGroups", rgCsv
-    ], { stdio: ["ignore", "pipe", "pipe"] });
-  } catch (err) {
-    console.error("Failed to start PowerShell process:", err);
-    return res.status(500).json({
-      status: "failed",
-      message: "Failed to start PowerShell process. Check server logs for details."
-    });
-  }
-
-  let stderr = "";
   let stdout = "";
-  ps.stderr.on("data", d => { stderr += String(d); });
-  ps.stdout.on("data", d => { stdout += String(d); });
+  let stderr = "";
 
-  ps.on("error", (err) => {
-    console.error("PowerShell process error:", err);
-    return res.status(500).json({
-      status: "failed",
-      message: "PowerShell script failed to run. Check server logs for details."
-    });
-  });
+  try {
+    const ps = spawn("pwsh", [
+      "-NoLogo", "-NonInteractive", "-File", scriptPath,
+      "-SubscriptionId", subscriptionId,
+      "-ResourceGroup", resourceGroup
+    ], { stdio: ["ignore", "pipe", "pipe"] });
 
-  ps.on("close", (code) => {
-    if (code !== 0) {
-      console.error("PowerShell script failed:", stderr || stdout);
-      return res.status(500).json({
-        status: "failed",
-        message: (stderr || stdout || "Assessment failed").slice(0, 1000)
-      });
-    }
-    // Return artifact paths expected by your Foundry agent/workflow
-    return res.json({
-      status: "completed",
-      subscriptionId,
-      artifacts: {
-        xlsx: `AzTfExport_Managed_RG_Report.xlsx`,
-        pdf:  `AzTfExport_Managed_RG_Report.pdf`
+    ps.stdout.on("data", (d) => { stdout += String(d); });
+    ps.stderr.on("data", (d) => { stderr += String(d); });
+
+    ps.on("close", (code) => {
+      clearInterval(heartbeat);
+      if (res.writableEnded) return;
+
+      const reportFolder = "C:/Users/sunsu/OneDrive/Desktop/Sundeep/AI-Projects/ai-Repository/Generative-AI-Projects/azure-2-terraform-migration/Azure-2-terraform-powershell-exports/ps/report";
+
+      try {
+        const files = fs.readdirSync(reportFolder);
+        const excelFile = files.find(f => f.endsWith(".xlsx") && f.startsWith("AzureAssessment"));
+        
+        if (excelFile) {
+          return res.status(200).end(JSON.stringify({
+            status: "completed",
+            subscriptionId,
+            resourceGroup,
+            artifacts: {
+              xlsx: path.join(reportFolder, excelFile),
+              folder: reportFolder
+            }
+          }));
+        } else {
+          throw new Error("Excel report not found in directory.");
+        }
+      } catch (err) {
+        return res.status(500).end(JSON.stringify({
+          status: "failed",
+          message: err.message,
+          details: stderr || stdout
+        }));
       }
     });
-  });
+
+    ps.on("error", (err) => {
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.status(500).end(JSON.stringify({ status: "failed", message: err.message }));
+    });
+
+  } catch (err) {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.status(500).end(JSON.stringify({ status: "failed", message: err.message }));
+  }
 });
 
-// Basic liveness
-app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+// ---- HEALTH CHECK & SERVER START ----
+app.get("/healthz", (req, res) => res.json({ status: "ok" }));
 
 const PORT = process.env.SUBSCRIPTION_ASSESSMENT_PORT || 4002;
-app.listen(PORT, () => {
-  console.log(`Subscription Assessment MCP server listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
+server.setTimeout(600000);

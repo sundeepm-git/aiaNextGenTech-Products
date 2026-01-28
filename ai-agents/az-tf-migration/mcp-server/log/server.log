@@ -1,0 +1,68 @@
+[2026-01-26T21:45:35.336Z] Loaded script path: C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\assessment-AzSubscription.ps1
+[2026-01-26T21:45:35.361Z] MCP server running on port 4002
+[2026-01-26T21:49:15.363Z] GET /assessment-ps/mcp endpoint hit
+[2026-01-26T21:54:36.203Z] GET /assessment-ps/mcp endpoint hit
+[2026-01-26T21:54:56.417Z] GET /assessment-ps/mcp endpoint hit
+[2026-01-26T22:28:30.370Z] MCP server running on port 4002
+[2026-01-26T22:29:27.603Z] POST /assessment-ps/mcp endpoint hit
+[2026-01-26T22:32:28.112Z] MCP server running on port 4002
+[2026-01-27T22:06:47.727Z] MCP server running on port 4002
+[2026-01-27T22:06:54.924Z] GET /assessment-ps/mcp
+[2026-01-27T22:07:01.801Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:07:01.801Z] 400: Missing subscriptionId or resourceGroup
+[2026-01-27T22:07:20.063Z] GET /assessment-ps/mcp
+[2026-01-27T22:07:35.982Z] POST /assessment-ps/mcp
+[2026-01-27T22:08:32.446Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:08:32.447Z] 400: Missing subscriptionId or resourceGroup
+[2026-01-27T22:09:34.788Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:09:34.789Z] 500: PowerShell script path missing
+[2026-01-27T22:13:44.136Z] MCP server running on port 4002
+[2026-01-27T22:13:49.409Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:13:49.410Z] 500: PowerShell script path missing
+[2026-01-27T22:13:52.313Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:13:52.314Z] 500: PowerShell script path missing
+[2026-01-27T22:16:38.990Z] MCP server running on port 4002
+[2026-01-27T22:16:41.434Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:16:41.435Z] 500: PowerShell script path missing
+[2026-01-27T22:18:05.808Z] MCP server running on port 4002
+[2026-01-27T22:18:11.514Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:18:11.514Z] 500: PowerShell script path missing
+[2026-01-27T22:22:21.741Z] MCP server running on port 4002
+[2026-01-27T22:22:43.552Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:22:43.573Z] Started PowerShell for subscriptionId=d0f1884d-1f98-4bf1-9e15-e2986fc1bca2, resourceGroup=rg-genai-infra-0014
+[2026-01-27T22:23:08.035Z] PowerShell completed successfully
+[2026-01-27T22:24:31.383Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:24:31.403Z] Started PowerShell for subscriptionId=d0f1884d-1f98-4bf1-9e15-e2986fc1bca2, resourceGroup=rg-genai-infra-0014
+[2026-01-27T22:24:56.347Z] PowerShell completed successfully
+[2026-01-27T22:25:24.879Z] MCP server running on port 4002
+[2026-01-27T22:25:27.939Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-27T22:25:27.955Z] Started PowerShell for subscriptionId=d0f1884d-1f98-4bf1-9e15-e2986fc1bca2, resourceGroup=rg-genai-infra-0014
+[2026-01-27T22:25:57.030Z] PowerShell completed successfully
+[2026-01-27T23:15:43.970Z] POST /assessment-ps/mcp
+[2026-01-27T23:18:29.218Z] POST /assessment-ps/mcp
+[2026-01-27T23:19:03.038Z] GET /assessment-ps/mcp
+[2026-01-27T23:26:49.873Z] MCP server running on port 4002
+[2026-01-27T23:27:42.729Z] POST /assessment-ps/mcp
+[2026-01-28T00:19:13.411Z] POST /assessment-ps/mcp
+[2026-01-28T00:21:27.985Z] POST /assessment-ps/mcp
+[2026-01-28T00:24:46.385Z] POST /assessment-ps/mcp
+[2026-01-28T00:32:56.456Z] MCP server running on port 4002
+[2026-01-28T00:40:44.529Z] GET /assessment-ps/mcp
+[2026-01-28T00:48:04.338Z] GET /assessment-ps/mcp
+[2026-01-28T00:48:10.731Z] GET /assessment-ps/mcp
+[2026-01-28T00:49:13.973Z] POST /assessment-ps/mcp
+[2026-01-28T00:50:37.093Z] POST /assessment-ps/mcp
+[2026-01-28T00:59:19.132Z] MCP server running on port 4002
+[2026-01-28T01:00:24.959Z] GET /assessment-ps/mcp
+[2026-01-28T01:01:15.631Z] POST /assessment-ps/mcp
+[2026-01-28T01:07:27.402Z] MCP server running on port 4002
+[2026-01-28T01:10:27.073Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-28T01:10:27.076Z] Executing Script at: C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\assessment-AzSubscription.ps1
+[2026-01-28T01:15:37.415Z] MCP server running on port 4002
+[2026-01-28T01:15:55.104Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-28T01:15:55.106Z] Executing Script at: C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\assessment-AzSubscription.ps1
+[2026-01-28T01:20:10.855Z] MCP server running on port 4002
+[2026-01-28T01:20:28.980Z] POST /mcp/tools/execute_powershell_assessment
+[2026-01-28T01:20:28.983Z] Executing Script at: C:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\azure-2-terraform-migration\Azure-2-terraform-powershell-exports\ps\assessment-AzSubscription.ps1
+[2026-01-28T01:20:56.651Z] Execution Failed. Code: 0, FileFound: false
+[2026-01-28T01:24:30.064Z] POST /mcp/tools/execute_powershell_assessment

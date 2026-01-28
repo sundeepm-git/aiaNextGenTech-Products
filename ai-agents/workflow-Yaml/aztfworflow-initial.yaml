@@ -1,0 +1,41 @@
+kind: workflow
+trigger:
+  kind: OnConversationStart
+  id: trigger_wf
+  actions:
+    - kind: InvokeAzureAgent
+      id: action-1768852498175
+      agent:
+        name: InfraAzTfMigrationOrchestrator-v1
+      conversationId: =System.ConversationId
+      input:
+        messages: =System.LastMessage
+      output:
+        autoSend: true
+        messages: Local.orchestratorOutput
+        responseObject: Local.orchestratorOutput
+    - kind: InvokeAzureAgent
+      id: action-1769444985600
+      agent:
+        name: infraAzTfAssessmentAgent-v1
+      conversationId: =System.ConversationId
+      input:
+        messages:
+          subscriptionId: =orchestratorResponse.subscriptionId
+          resourceGroup: =orchestratorResponse.resourceGroup
+      output:
+        autoSend: true
+        messages: Local.assessmentOutput
+        responseObject: Local.assessmentOutput
+    - kind: InvokeAzureAgent
+      id: action-1769445003129
+      agent:
+        name: infraAzTfExportAgent-v1
+      conversationId: =System.ConversationId
+      input:
+        messages: =System.LastMessage
+      output:
+        autoSend: true
+id: ""
+name: Infra-AztfMigration-Workflow
+description: ""
