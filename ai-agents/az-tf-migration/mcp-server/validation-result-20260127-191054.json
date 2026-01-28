@@ -1,0 +1,63 @@
+{
+  "RequiredPermissions": [
+    {
+      "Role": "Reader",
+      "Description": "Minimum required role to list resource groups and resources",
+      "Scope": "Subscription Level"
+    }
+  ],
+  "MissingModules": [],
+  "Status": "Failed",
+  "Warnings": [],
+  "ValidationChecks": [
+    {
+      "Required": "7.0 or higher",
+      "Status": "Pass",
+      "Name": "PowerShell Version",
+      "Message": "PowerShell version check passed: 7.5.4",
+      "Actual": "7.5.4"
+    },
+    {
+      "Required": "Installed",
+      "Status": "Pass",
+      "Name": "Az.Accounts Module",
+      "Message": "Az.Accounts module found: 2.11.1",
+      "Actual": "Version 2.11.1"
+    },
+    {
+      "Required": "Installed",
+      "Status": "Pass",
+      "Name": "ImportExcel Module",
+      "Message": "ImportExcel module found: 7.8.10",
+      "Actual": "Version 7.8.10"
+    },
+    {
+      "Required": "Authenticated",
+      "Status": "Pass",
+      "Name": "Azure Authentication",
+      "Message": "Authenticated as sun.study29@gmail.com in tenant a0e1f124-d84e-4ef7-bf4b-926b60443fb9",
+      "Actual": "Authenticated as sun.study29@gmail.com"
+    },
+    {
+      "Required": "Accessible",
+      "Status": "Fail",
+      "Name": "Subscription Access",
+      "Message": "Failed to access subscription: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond. (management.azure.com:443)",
+      "Actual": "Not Accessible"
+    },
+    {
+      "Required": "Reader or higher",
+      "Status": "Skipped",
+      "Name": "RBAC Role Verification",
+      "Message": "Skipped due to failed subscription access check",
+      "Actual": ""
+    }
+  ],
+  "Errors": [
+    "Cannot access subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 : A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond. (management.azure.com:443)"
+  ],
+  "Recommendations": [
+    "Ensure you have at least Reader role on subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2"
+  ],
+  "Timestamp": "2026-01-27T19:10:28.4575841-06:00"
+}

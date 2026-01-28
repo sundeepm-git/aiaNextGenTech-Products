@@ -1,0 +1,66 @@
+{
+  "Errors": [],
+  "MissingModules": [],
+  "Status": "Success",
+  "RequiredPermissions": [
+    {
+      "Description": "Minimum required role to list resource groups and resources",
+      "Scope": "Subscription Level",
+      "Role": "Reader"
+    }
+  ],
+  "Warnings": [],
+  "Timestamp": "2026-01-27T19:20:32.2746458-06:00",
+  "Recommendations": [],
+  "ValidationChecks": [
+    {
+      "Name": "PowerShell Version",
+      "Actual": "7.5.4",
+      "Status": "Pass",
+      "Required": "7.0 or higher",
+      "Message": "PowerShell version check passed: 7.5.4"
+    },
+    {
+      "Name": "Az.Accounts Module",
+      "Actual": "Version 2.11.1",
+      "Status": "Pass",
+      "Required": "Installed",
+      "Message": "Az.Accounts module found: 2.11.1"
+    },
+    {
+      "Name": "ImportExcel Module",
+      "Actual": "Version 7.8.10",
+      "Status": "Pass",
+      "Required": "Installed",
+      "Message": "ImportExcel module found: 7.8.10"
+    },
+    {
+      "Name": "Azure Authentication",
+      "Actual": "Authenticated as sun.study29@gmail.com",
+      "Status": "Pass",
+      "Required": "Authenticated",
+      "Message": "Authenticated as sun.study29@gmail.com in tenant a0e1f124-d84e-4ef7-bf4b-926b60443fb9"
+    },
+    {
+      "Name": "Subscription Access",
+      "Actual": "Accessible: Enterprise-Enrollment-Subscription",
+      "Status": "Pass",
+      "Required": "Accessible",
+      "Message": "Successfully accessed subscription: Enterprise-Enrollment-Subscription (d0f1884d-1f98-4bf1-9e15-e2986fc1bca2)"
+    },
+    {
+      "Name": "Resource Group Access: rg-genai-infra-0014",
+      "Actual": "Accessible: eastus",
+      "Status": "Pass",
+      "Required": "Accessible",
+      "Message": "Resource group 'rg-genai-infra-0014' is accessible in location eastus"
+    },
+    {
+      "Name": "RBAC Role Verification",
+      "Actual": "Sufficient permissions",
+      "Status": "Pass",
+      "Required": "Reader or higher",
+      "Message": "Successfully verified read access to subscription resources"
+    }
+  ]
+}

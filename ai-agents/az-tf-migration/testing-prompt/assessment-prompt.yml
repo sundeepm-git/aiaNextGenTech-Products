@@ -1,0 +1,5 @@
+Run assessment for the following inputs:
+
+SubscriptionId: d0f1884d-1f98-4bf1-9e15-e2986fc1bca2
+ResourceGroup2:
+- rg-genai-infra-0014

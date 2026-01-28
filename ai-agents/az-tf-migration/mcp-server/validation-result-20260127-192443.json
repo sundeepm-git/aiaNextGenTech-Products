@@ -1,0 +1,66 @@
+{
+  "RequiredPermissions": [
+    {
+      "Description": "Minimum required role to list resource groups and resources",
+      "Scope": "Subscription Level",
+      "Role": "Reader"
+    }
+  ],
+  "Warnings": [],
+  "Errors": [],
+  "Recommendations": [],
+  "Status": "Success",
+  "ValidationChecks": [
+    {
+      "Status": "Pass",
+      "Message": "PowerShell version check passed: 7.5.4",
+      "Actual": "7.5.4",
+      "Required": "7.0 or higher",
+      "Name": "PowerShell Version"
+    },
+    {
+      "Status": "Pass",
+      "Message": "Az.Accounts module found: 2.11.1",
+      "Actual": "Version 2.11.1",
+      "Required": "Installed",
+      "Name": "Az.Accounts Module"
+    },
+    {
+      "Status": "Pass",
+      "Message": "ImportExcel module found: 7.8.10",
+      "Actual": "Version 7.8.10",
+      "Required": "Installed",
+      "Name": "ImportExcel Module"
+    },
+    {
+      "Status": "Pass",
+      "Message": "Authenticated as sun.study29@gmail.com in tenant a0e1f124-d84e-4ef7-bf4b-926b60443fb9",
+      "Actual": "Authenticated as sun.study29@gmail.com",
+      "Required": "Authenticated",
+      "Name": "Azure Authentication"
+    },
+    {
+      "Status": "Pass",
+      "Message": "Successfully accessed subscription: Enterprise-Enrollment-Subscription (d0f1884d-1f98-4bf1-9e15-e2986fc1bca2)",
+      "Actual": "Accessible: Enterprise-Enrollment-Subscription",
+      "Required": "Accessible",
+      "Name": "Subscription Access"
+    },
+    {
+      "Status": "Pass",
+      "Message": "Resource group 'rg-genai-infra-0014' is accessible in location eastus",
+      "Actual": "Accessible: eastus",
+      "Required": "Accessible",
+      "Name": "Resource Group Access: rg-genai-infra-0014"
+    },
+    {
+      "Status": "Pass",
+      "Message": "Successfully verified read access to subscription resources",
+      "Actual": "Sufficient permissions",
+      "Required": "Reader or higher",
+      "Name": "RBAC Role Verification"
+    }
+  ],
+  "MissingModules": [],
+  "Timestamp": "2026-01-27T19:24:31.0184753-06:00"
+}
