@@ -1,147 +1,94 @@
-import express from "express";
-import fs from "fs";
-import path from "path";
-import { spawn } from "child_process";
-import { fileURLToPath } from "url";
-import dotenv from "dotenv";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { spawn } from 'child_process';
+import { env } from "process";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
+// 1. Initialize the MCP Server
+const server = new McpServer({
+  name: "Azure-Resource-Assessor",
+  version: "1.0.1",
+});
 
-// Simple log function
-function log(message) {
-  const logDir = path.join(__dirname, "../../log");
-  const logFile = path.join(logDir, "server.log");
-  const timestamp = new Date().toISOString();
-  const entry = `[${timestamp}] ${message}\n`;
-  try {
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
+// 2. Define the Assessment Tool for a Single Resource Group
+server.tool(
+  "assess_azure_environment",
+  {
+    subscriptionId: z.string().describe("The Azure Subscription ID to assess"),
+    resourceGroup: z.string().optional().describe("A single specific Resource Group to assess (e.g., 'rg-production'). If omitted, the whole subscription is scanned.")
+  },
+  async ({ subscriptionId, resourceGroup }) => {
+    try {
+      // Path verified in your Kudu/App Service environment
+      const scriptPath = env.POWERSHELL_SCRIPT_PATH //'D:\\home\\site\\wwwroot\\ps\\ps\\assessment-AzSubscription.ps1';
+      
+      // Prepare base PowerShell arguments
+      let psArgs = [
+        '-NoProfile', 
+        '-ExecutionPolicy', 'Bypass', 
+        '-File', scriptPath, 
+        '-SubscriptionId', subscriptionId
+      ];
+
+      // Add single ResourceGroup if provided
+      if (resourceGroup) {
+        psArgs.push('-ResourceGroups', resourceGroup);
+      }
+
+      const result = await new Promise((resolve, reject) => {
+        // Spawn the process
+        const ps = spawn('powershell.exe', psArgs);
+
+        let stdout = '';
+        let stderr = '';
+
+        // Capture standard output (Data)
+        ps.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        // Capture standard error (Logs/Errors)
+        ps.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        ps.on('close', (code) => {
+          if (code === 0) {
+            resolve({
+              content: [
+                { 
+                  type: "text", 
+                  text: `Assessment Complete for ${resourceGroup || 'Full Subscription'}.\n\nOutput:\n${stdout}` 
+                }
+              ]
+            });
+          } else {
+            // Include stderr in the rejection to help debug Kudu permissions or paths
+            reject(new Error(stderr || `PowerShell exited with code ${code}`));
+          }
+        });
+      });
+
+      return result;
+
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Execution Failed: ${error.message}` }]
+      };
     }
-    fs.appendFileSync(logFile, entry);
-  } catch (err) {
-    console.error("Failed to write log:", err);
   }
+);
+
+// 3. Start the Server with Stdio Transport
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  // Logs to stderr are visible in Kudu logs without interfering with MCP protocol
+  console.error("Azure MCP Server started successfully.");
 }
 
-const discoveryResponse = {
-  tools: [
-    {
-      name: "execute_powershell_assessment",
-      description: "Runs the PowerShell assessment for Azure to Terraform migration",
-      inputSchema: {
-        type: "object",
-        required: ["subscriptionId", "resourceGroup"],
-        properties: {
-          subscriptionId: { type: "string" },
-          resourceGroup: { type: "string" }
-        },
-        additionalProperties: false
-      }
-    }
-  ]
-};
-
-const app = express();
-app.use(express.json({ limit: "1mb" }));
-
-// ---- MCP DISCOVERY ENDPOINTS ----
-app.get("/assessment-ps/mcp", (req, res) => {
-  log("GET /assessment-ps/mcp");
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  return res.status(200).json(discoveryResponse);
+main().catch((error) => {
+  console.error("Fatal error in MCP Server:", error);
+  process.exit(1);
 });
-
-app.post("/assessment-ps/mcp", (req, res) => {
-  log("POST /assessment-ps/mcp");
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  return res.status(200).json(discoveryResponse);
-});
-
-// ---- MCP TOOL EXECUTION ----
-app.post("/mcp/tools/execute_powershell_assessment", (req, res) => {
-  log("POST /mcp/tools/execute_powershell_assessment");
-
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Connection", "keep-alive");
-
-  const body = req.body || {};
-  const subscriptionId = (body.subscriptionId || body.params?.arguments?.subscriptionId || "").trim();
-  const resourceGroup = (body.resourceGroup || body.params?.arguments?.resourceGroup || "").trim();
-
-  if (!subscriptionId || !resourceGroup) {
-    log("400: Missing input data");
-    return res.status(400).end(JSON.stringify({ status: "failed", message: "subscriptionId and resourceGroup required" }));
-  }
-
-  const scriptPath = process.env.POWERSHELL_SCRIPT_PATH;
-  const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(" "); }, 15000);
-
-  let stdout = "";
-  let stderr = "";
-
-  try {
-    const ps = spawn("pwsh", [
-      "-NoLogo", "-NonInteractive", "-File", scriptPath,
-      "-SubscriptionId", subscriptionId,
-      "-ResourceGroup", resourceGroup
-    ], { stdio: ["ignore", "pipe", "pipe"] });
-
-    ps.stdout.on("data", (d) => { stdout += String(d); });
-    ps.stderr.on("data", (d) => { stderr += String(d); });
-
-    ps.on("close", (code) => {
-      clearInterval(heartbeat);
-      if (res.writableEnded) return;
-
-      const reportFolder = "C:/Users/sunsu/OneDrive/Desktop/Sundeep/AI-Projects/ai-Repository/Generative-AI-Projects/azure-2-terraform-migration/Azure-2-terraform-powershell-exports/ps/report";
-
-      try {
-        const files = fs.readdirSync(reportFolder);
-        const excelFile = files.find(f => f.endsWith(".xlsx") && f.startsWith("AzureAssessment"));
-        
-        if (excelFile) {
-          return res.status(200).end(JSON.stringify({
-            status: "completed",
-            subscriptionId,
-            resourceGroup,
-            artifacts: {
-              xlsx: path.join(reportFolder, excelFile),
-              folder: reportFolder
-            }
-          }));
-        } else {
-          throw new Error("Excel report not found in directory.");
-        }
-      } catch (err) {
-        return res.status(500).end(JSON.stringify({
-          status: "failed",
-          message: err.message,
-          details: stderr || stdout
-        }));
-      }
-    });
-
-    ps.on("error", (err) => {
-      clearInterval(heartbeat);
-      if (!res.writableEnded) res.status(500).end(JSON.stringify({ status: "failed", message: err.message }));
-    });
-
-  } catch (err) {
-    clearInterval(heartbeat);
-    if (!res.writableEnded) res.status(500).end(JSON.stringify({ status: "failed", message: err.message }));
-  }
-});
-
-// ---- HEALTH CHECK & SERVER START ----
-app.get("/healthz", (req, res) => res.json({ status: "ok" }));
-
-const PORT = process.env.SUBSCRIPTION_ASSESSMENT_PORT || 4002;
-const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
-server.setTimeout(600000);
