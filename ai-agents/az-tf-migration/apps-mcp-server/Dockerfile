@@ -1,3 +1,7 @@
+# Build Instructions:
+# docker build --no-cache -t aztf-mcp-server .
+# docker run -p 8080:8080 aztf-mcp-server
+
 # 1. Base image with Node
 FROM mcr.microsoft.com/devcontainers/javascript-node:1-22-bullseye
 
@@ -37,6 +41,16 @@ RUN npm ci --omit=dev --ignore-scripts && \
 
 # 6. Copy the rest of the app
 COPY . .
+
+# 6.1. Verify critical files copied correctly
+RUN echo "=== Verifying File Structure ===" && \
+    ls -la /app/ && \
+    echo "=== PS Directory ===" && \
+    ls -la /app/ps/ && \
+    echo "=== Python Directory ===" && \
+    ls -la /app/python/ && \
+    echo "=== Tools Directory ===" && \
+    ls -la /app/tools/
 
 # 6.5. Install Python dependencies for refactor engine
 RUN if [ -f python/requirements.txt ]; then \

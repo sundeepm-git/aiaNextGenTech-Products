@@ -36,6 +36,14 @@
     When specified, skips post-deployment verification tests.
     Useful for faster deployments when you don't need immediate validation.
 
+.PARAMETER LocalTest
+    When specified, runs a local Docker container test before pushing to Azure.
+    Tests health and tools endpoints to verify all 3 tools are registered.
+
+.PARAMETER NoCache
+    When specified, forces Docker to build without using cache.
+    Use this to ensure fresh builds with latest code changes.
+
 .EXAMPLE
     .\deploy.ps1
     Runs full deployment with default settings (rg-aztf-mcp-prod in eastus)
@@ -113,7 +121,13 @@ param(
     [switch]$SkipBuild,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipTests
+    [switch]$SkipTests,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$LocalTest,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$NoCache
 )
 
 # Script configuration
@@ -354,7 +368,15 @@ try {
     # Creates containerized application with Node.js, PowerShell 7, and Azure modules
     if (-not $SkipBuild) {
         Write-Status "Building Docker image..." -Type Step
-        docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+        
+        $buildArgs = @("-t", "${IMAGE_NAME}:${IMAGE_TAG}")
+        if ($NoCache) {
+            Write-Status "Building with --no-cache flag for clean build" -Type Info
+            $buildArgs += "--no-cache"
+        }
+        $buildArgs += "."
+        
+        docker build @buildArgs
         
         if ($LASTEXITCODE -ne 0) {
             Write-Status "Docker build failed" -Type Error
@@ -362,6 +384,86 @@ try {
         }
         Write-Status "Docker image built successfully" -Type Success
         Write-Host ""
+        
+        # Step 2.5: Local test (optional)
+        if ($LocalTest) {
+            Write-Status "Running local container test..." -Type Step
+            Write-Host ""
+            
+            # Stop any existing test container
+            docker stop aztf-mcp-test 2>$null
+            docker rm aztf-mcp-test 2>$null
+            
+            Write-Status "Starting container on port 8080..." -Type Info
+            docker run -d --name aztf-mcp-test -p 8080:8080 "${IMAGE_NAME}:${IMAGE_TAG}"
+            
+            Wait-ForDeployment "Waiting for container to start" 10
+            
+            # Test health endpoint
+            Write-Status "Testing /health endpoint..." -Type Info
+            try {
+                $health = Invoke-RestMethod -Uri "http://localhost:8080/health" -TimeoutSec 15
+                Write-Status "Health Response:" -Type Success
+                $health | ConvertTo-Json -Depth 3 | Write-Host
+                
+                if ($health.status -ne "healthy") {
+                    Write-Status "Health check failed - status: $($health.status)" -Type Error
+                    docker logs aztf-mcp-test
+                    docker stop aztf-mcp-test
+                    docker rm aztf-mcp-test
+                    exit 1
+                }
+            } catch {
+                Write-Status "Health check failed: $_" -Type Error
+                docker logs aztf-mcp-test
+                docker stop aztf-mcp-test
+                docker rm aztf-mcp-test
+                exit 1
+            }
+            
+            Write-Host ""
+            
+            # Test tools endpoint
+            Write-Status "Testing /tools endpoint..." -Type Info
+            try {
+                $tools = Invoke-RestMethod -Uri "http://localhost:8080/tools" -TimeoutSec 15
+                $toolCount = $tools.registered_tools.Count
+                
+                Write-Status "Found $toolCount registered tools:" -Type Success
+                foreach ($tool in $tools.registered_tools) {
+                    Write-Host "  • $($tool.name)" -ForegroundColor Cyan
+                }
+                
+                if ($toolCount -ne 3) {
+                    Write-Status "Expected 3 tools, found $toolCount" -Type Error
+                    Write-Host ""
+                    Write-Host "Filesystem check:" -ForegroundColor Yellow
+                    $tools.filesystem_check | Format-Table -AutoSize
+                    docker logs aztf-mcp-test
+                    docker stop aztf-mcp-test
+                    docker rm aztf-mcp-test
+                    exit 1
+                }
+                
+                Write-Host ""
+                Write-Host "Filesystem verification:" -ForegroundColor Yellow
+                $tools.filesystem_check | Format-Table -AutoSize
+                
+            } catch {
+                Write-Status "Tools check failed: $_" -Type Error
+                docker logs aztf-mcp-test
+                docker stop aztf-mcp-test
+                docker rm aztf-mcp-test
+                exit 1
+            }
+            
+            # Cleanup
+            Write-Status "Cleaning up test container..." -Type Info
+            docker stop aztf-mcp-test
+            docker rm aztf-mcp-test
+            Write-Status "Local test passed ✓" -Type Success
+            Write-Host ""
+        }
     }
     else {
         Write-Status "Skipping Docker build" -Type Warning
@@ -639,9 +741,10 @@ try {
         # Verify the application is responding correctly
         Write-Status "Testing health endpoint..." -Type Info
         try {
-            $response = Invoke-RestMethod -Uri "https://$APP_URL/" -Method Get -TimeoutSec 30
-            if ($response -match "MCP Server is UP") {
+            $response = Invoke-RestMethod -Uri "https://$APP_URL/health" -Method Get -TimeoutSec 30
+            if ($response.status -eq "healthy") {
                 Write-Status "Health check PASSED ✓" -Type Success
+                Write-Host "  Tools registered: $($response.toolsCount)" -ForegroundColor Gray
             }
             else {
                 Write-Status "Health check returned unexpected response" -Type Warning
@@ -650,6 +753,30 @@ try {
         catch {
             Write-Status "Health check failed: $($_.Exception.Message)" -Type Warning
             Write-Status "The application may still be starting up. Please check logs." -Type Info
+        }
+        
+        Write-Host ""
+        
+        # Test tools endpoint
+        Write-Status "Testing tools endpoint..." -Type Info
+        try {
+            $tools = Invoke-RestMethod -Uri "https://$APP_URL/tools" -Method Get -TimeoutSec 30
+            $toolCount = $tools.registered_tools.Count
+            
+            Write-Status "Found $toolCount registered tools:" -Type Success
+            foreach ($tool in $tools.registered_tools) {
+                Write-Host "  • $($tool.name)" -ForegroundColor Cyan
+            }
+            
+            if ($toolCount -ne 3) {
+                Write-Status "Expected 3 tools, found $toolCount - checking filesystem..." -Type Warning
+                Write-Host ""
+                Write-Host "Filesystem check:" -ForegroundColor Yellow
+                $tools.filesystem_check | Format-Table -AutoSize
+            }
+        }
+        catch {
+            Write-Status "Tools check failed: $($_.Exception.Message)" -Type Warning
         }
         
         Write-Host ""
@@ -668,9 +795,14 @@ try {
     # Display comprehensive success summary and next steps
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
     Write-Host "Next Steps:" -ForegroundColor Yellow
-    Write-Host "  1. Test the health endpoint: curl https://$APP_URL/" -ForegroundColor White
-    Write-Host "  2. View logs: az containerapp logs show --name $CONTAINER_APP_NAME --resource-group $ResourceGroup --follow" -ForegroundColor White
-    Write-Host "  3. Integrate with Azure AI Foundry using the URL above" -ForegroundColor White
+    Write-Host "  1. Test health: curl https://$APP_URL/health" -ForegroundColor White
+    Write-Host "  2. Test tools:  curl https://$APP_URL/tools" -ForegroundColor White
+    Write-Host "  3. View logs:   az containerapp logs show --name $CONTAINER_APP_NAME --resource-group $ResourceGroup --follow" -ForegroundColor White
+    Write-Host "  4. Exec shell:  az containerapp exec --name $CONTAINER_APP_NAME --resource-group $ResourceGroup --command /bin/bash" -ForegroundColor White
+    Write-Host "  5. List files:  az containerapp exec --name $CONTAINER_APP_NAME --resource-group $ResourceGroup --command 'ls -R /app/ps'" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Diagnostics:" -ForegroundColor Yellow
+    Write-Host "  Run: .\diagnose-azure.ps1 -ResourceGroup $ResourceGroup -AppName $CONTAINER_APP_NAME" -ForegroundColor White
     Write-Host ""
     Write-Host "To view all resources:" -ForegroundColor Yellow
     Write-Host "  az resource list --resource-group $ResourceGroup --output table" -ForegroundColor White

@@ -23,6 +23,13 @@ const server = new McpServer({
 });
 
 // --- TOOL REGISTRATION ---
+if(!isStdioMode) {
+    console.error(`[Environment] Node Version: ${process.version}`);
+    console.error(`[Environment] Platform: ${process.platform}`);
+    console.error(`[Environment] CWD: ${process.cwd()}`);
+    console.error(`[Environment] __dirname: ${__dirname}`);
+}
+
 import { assessmentToolDefinition, assessmentToolHandler, initializeBlobStorage, executeAssessmentJob } from './tools/assessment.js';
 import { aztfexportToolDefinition, aztfexportToolHandler, executeExportJob as executeAzTfExportJob } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
@@ -31,6 +38,7 @@ if(!isStdioMode) {
     console.error(`[Tool Registration] Assessment: ${assessmentToolDefinition?.name || 'MISSING'}`);
     console.error(`[Tool Registration] Export: ${aztfexportToolDefinition?.name || 'MISSING'}`);
     console.error(`[Tool Registration] Refactor: ${refactorToolDefinition?.name || 'MISSING'}`);
+    console.error(`[Tool Import] All tools imported successfully`);
 }
 
 const blobStorageInfo = await initializeBlobStorage(isStdioMode);
@@ -82,12 +90,18 @@ const toolContext = {
 };
 
 server.tool(assessmentToolDefinition.name, assessmentToolDefinition.schema, (p) => assessmentToolHandler(p, toolContext));
+if(!isStdioMode) console.error(`[Server] ✓ Registered: ${assessmentToolDefinition.name}`);
+
 server.tool(aztfexportToolDefinition.name, aztfexportToolDefinition.schema, (p) => aztfexportToolHandler(p, toolContext));
+if(!isStdioMode) console.error(`[Server] ✓ Registered: ${aztfexportToolDefinition.name}`);
+
 server.tool(refactorToolDefinition.name, refactorToolDefinition.schema, (p) => refactorToolHandler(p, toolContext));
+if(!isStdioMode) console.error(`[Server] ✓ Registered: ${refactorToolDefinition.name}`);
 
 if(!isStdioMode) {
     console.error(`[Server] Registered tools: ${server.listTools ? 'listTools available' : 'listTools NOT available'}`);
     console.error(`[Server] Total tools registered: 3`);
+    console.error(`[Server] Tool registration complete ✓`);
 }
 
 // --- APP SETUP ---
@@ -109,20 +123,26 @@ let activeSseTransport = null;
 
 // Health endpoint
 app.get("/health", (req, res) => {
-    res.json({ 
-        status: "healthy", 
+    res.status(200).json({ 
+        status: "healthy",
+        server: "Azure-Terraform-Migration-Server",
+        version: "1.0.0",
         timestamp: new Date().toISOString(),
         tools: [
             assessmentToolDefinition.name,
             aztfexportToolDefinition.name,
             refactorToolDefinition.name
-        ]
+        ],
+        toolsCount: 3
     });
 });
 
 // Tools list endpoint for debugging
 app.get("/tools", (req, res) => {
-    res.json({
+    const psDir = path.resolve(__dirname, 'ps');
+    const pythonDir = path.resolve(__dirname, 'python');
+    
+    res.status(200).json({
         registered_tools: [
             {
                 name: assessmentToolDefinition.name,
@@ -138,7 +158,22 @@ app.get("/tools", (req, res) => {
             }
         ],
         blob_storage: blobStorageInfo ? "initialized" : "not initialized",
-        local_report_dir: localReportDir
+        local_report_dir: localReportDir,
+        filesystem_check: {
+            ps_dir_exists: fs.existsSync(psDir),
+            ps_dir_path: psDir,
+            python_dir_exists: fs.existsSync(pythonDir),
+            python_dir_path: pythonDir,
+            assessment_script_exists: fs.existsSync(path.join(psDir, 'assessment-AzSubscription.ps1')),
+            export_script_exists: fs.existsSync(path.join(psDir, 'Export-AzToTerraform.ps1')),
+            refactor_script_exists: fs.existsSync(path.join(pythonDir, 'refactor.py'))
+        },
+        environment: {
+            node_version: process.version,
+            platform: process.platform,
+            cwd: process.cwd(),
+            dirname: __dirname
+        }
     });
 });
 
