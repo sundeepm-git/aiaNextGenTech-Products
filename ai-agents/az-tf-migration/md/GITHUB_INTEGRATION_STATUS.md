@@ -11,9 +11,9 @@ Your Azure-to-Terraform migration pipeline is **fully configured** to upload to 
 ### .env File
 ```bash
 OUTPUT_DESTINATION=both
-GITHUB_TOKEN=your-github-token-here
-GITHUB_OWNER=sundeepm-git
-GITHUB_REPO=refactored-terraform
+GITHUB_TOKEN=<your-github-token-here>
+GITHUB_OWNER=<your-github-username>
+GITHUB_REPO=<your-repo-name>
 GITHUB_BRANCH=main
 
 ASSESSMENT_FOLDER=assessment-reports
