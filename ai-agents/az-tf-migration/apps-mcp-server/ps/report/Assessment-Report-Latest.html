@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure Subscription Assessment Report</title>
+    <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #F5F5F5; color: #333; line-height: 1.6; }
+    .container { max-width: 1400px; margin: 0 auto; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 30px; text-align: center; }
+    .header h1 { font-size: 32px; margin-bottom: 10px; font-weight: 600; }
+    .header p { font-size: 16px; opacity: 0.9; }
+    .content { padding: 30px; }
+    .section { margin-bottom: 40px; background: white; border-radius: 8px; }
+    .section-title { background: #F8F9FA; padding: 15px 20px; font-size: 20px; font-weight: bold; color: #2E5090; border-left: 5px solid #4472C4; margin-bottom: 20px; border-radius: 4px; }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px; }
+    .info-item { background: #F8F9FA; padding: 15px; border-radius: 5px; border-left: 3px solid #4472C4; }
+    .info-label { font-weight: bold; color: #2E5090; font-size: 14px; margin-bottom: 5px; }
+    .info-value { color: #333; font-size: 16px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.3s; }
+    .stat-card:hover { transform: translateY(-5px); }
+    .stat-number { font-size: 36px; font-weight: bold; margin-bottom: 5px; }
+    .stat-label { font-size: 14px; opacity: 0.9; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+    table thead { background: #4472C4; color: white; }
+    table th { padding: 12px; text-align: left; font-weight: 600; font-size: 14px; }
+    table tbody tr { border-bottom: 1px solid #E0E0E0; transition: background 0.2s; }
+    table tbody tr:hover { background: #F5F5F5; }
+    table tbody tr:last-child { border-bottom: none; }
+    table td { padding: 12px; font-size: 13px; }
+    .status-managed { background: #28A745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
+    .status-reference { background: #FFC107; color: #333; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
+    .success { background-color: #dff6dd; color: #107c10; font-weight: bold; padding: 8px; }
+    .warning { background-color: #fff4ce; color: #795e00; font-weight: bold; padding: 8px; }
+    .neutral { background-color: #f3f2f1; color: #323130; padding: 8px; }
+    .type-count { display: flex; justify-content: space-between; padding: 10px 15px; background: #F8F9FA; margin-bottom: 5px; border-radius: 3px; border-left: 3px solid #4472C4; }
+    .type-name { font-weight: 500; color: #333; }
+    .type-number { font-weight: bold; color: #4472C4; background: white; padding: 2px 8px; border-radius: 3px; }
+    .footer { background: #F8F9FA; padding: 20px 30px; text-align: center; color: #666; font-size: 14px; border-top: 2px solid #E0E0E0; }
+    .highlight-box { background: #E3F2FD; border-left: 4px solid #2196F3; padding: 15px; margin: 15px 0; border-radius: 4px; }
+</style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Azure Subscription Assessment Report</h1>
+            <p>Subscription: d0f1884d-1f98-4bf1-9e15-e2986fc1bca2</p>
+        </div>
+        
+        <div class="content">
+            <!-- Assessment Summary -->
+            <div class="section">
+                <div class="section-title">Assessment Summary</div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number">5</div>
+                        <div class="stat-label">Total Resources</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">5</div>
+                        <div class="stat-label">Managed Resources</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">0</div>
+                        <div class="stat-label">Reference Resources</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Report Outcome -->
+            <div class="section">
+                <div class="section-title">Report Outcome: aztfexport Suitability</div>
+                <table>
+                    <thead>
+                        <tr><th>Metric</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Total Resources</td><td><strong>5</strong></td></tr>
+                        <tr><td>Managed (Workload)</td><td><span class="status-managed">5</span></td></tr>
+                        <tr><td>Reference (Platform)</td><td><span class="status-reference">0</span></td></tr>
+                        <tr class='success'><td><strong>Decision</strong></td><td><strong>Strong Candidate</strong></td></tr>
+                        <tr><td>Recommendation</td><td>Contains 5 supported workload resources. Use 'aztfexport' to codify.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Managed Resources by Type -->
+            <div class="section">
+                <div class="section-title">Managed Resources by Type</div>                <div class="type-count">
+                    <span class="type-name">Microsoft.App/containerApps</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.App/managedEnvironments</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.ContainerRegistry/registries</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.OperationalInsights/workspaces</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.Storage/storageAccounts</span>
+                    <span class="type-number">1</span>
+                </div>            </div>
+            
+            <!-- Reference Resources by Type -->
+            <div class="section">
+                <div class="section-title">Reference Resources by Type</div><p style="color: #666; font-style: italic; padding: 10px;">No reference resources found.</p>            </div>
+            
+            <!-- Managed Resources Detail -->
+            <div class="section">
+                <div class="section-title">Managed Resources - Detailed Listing</div>                <table>
+                    <thead>
+                        <tr>
+                            <th>Resource Group</th>
+                            <th>Resource Name</th>
+                            <th>Resource Type</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>                        <tr>
+                            <td>rg-mcp-servers</td>
+                            <td>aztfmcpacr</td>
+                            <td>Microsoft.ContainerRegistry/registries</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-mcp-servers</td>
+                            <td>workspace-rgmcpserversIh7a</td>
+                            <td>Microsoft.OperationalInsights/workspaces</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-mcp-servers</td>
+                            <td>mcp-aca-env</td>
+                            <td>Microsoft.App/managedEnvironments</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-mcp-servers</td>
+                            <td>aztf-mcp-app</td>
+                            <td>Microsoft.App/containerApps</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-mcp-servers</td>
+                            <td>samcpstorage</td>
+                            <td>Microsoft.Storage/storageAccounts</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                    </tbody>
+                </table>            </div>
+            
+            <!-- Reference Resources Detail -->
+            <div class="section">
+                <div class="section-title">Reference Resources - Detailed Listing</div><p style="color: #666; font-style: italic; padding: 10px;">No reference resources found.</p>            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Report Generated: 2026-02-04 15:21:22</p>
+            <p>Azure Subscription Assessment Tool</p>
+        </div>
+    </div>
+</body>
+</html>

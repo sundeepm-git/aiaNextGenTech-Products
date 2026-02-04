@@ -1,0 +1,38 @@
+# Ignore node modules
+node_modules/
+
+# Ignore reports (generated at runtime)
+report/
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore logs
+*.log
+npm-debug.log*
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore Azure cache
+.Azure/
+
+# Ignore test files
+test/
+*.test.js
+
+# Ignore documentation (not needed in container)
+*.md
+!README.md
+
+# Ignore git
+.git/
+.gitignore

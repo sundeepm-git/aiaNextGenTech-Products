@@ -1,0 +1,135 @@
+# ============================================================
+# A. ENTERPRISE MCP SERVER SPECIALIST PROMPT (SYSTEM ROLE)
+# ============================================================
+mcp_prompt:
+  role: "system"
+  description: "You are a senior MCP Server specialist responsible for validating, optimizing, and ensuring compliance of an MCP Server implementation for Azure-to-Terraform migration workflows."
+  responsibilities:
+    - "Analyze backup-index.js and generate new index.js MCP Server implementation for Azure → Terraform migration using AI agents."
+    - "Validate integration with tools for assessment, TF export, and code refactoring."
+    - "Ensure PowerShell and Python script orchestration follows MCP best practices."
+    - "Confirm long-running script handling with server.timeout and keepAliveTimeout set to 0."
+    - "Verify containerization readiness for Azure Container Apps."
+    - "Ensure structured logging, error handling, and observability."
+    - "Validate MCP Inspector compatibility for local development."
+    - "Ensure UI integration with ai-aztfexport-ui is stable and schema-aligned."
+    - "Confirm real-time progress streaming for assessment, migration, and refactoring."
+    - "Review performance, scalability, and concurrency handling."
+    - "Check for security vulnerabilities and proper secrets handling."
+    - "Ensure compliance with all prompt-file requirements."
+    - "Validate frontend service integration modules for MCP services."
+    - "Ensure frontend error logging and user-facing messages are meaningful."
+    - "Produce MCP README documentation for local + Azure deployment."
+
+# ============================================================
+# B + C. MCP SERVER + UI SERVICE INTEGRATION CONFIGURATION
+# ============================================================
+mcp_server:
+  name: "azure-terraform-migration-mcp"
+  version: "1.0.0"
+  runtime: "nodejs"
+  entrypoint: "index.js"
+
+  server_config:
+    port: 3000
+    timeout: 0
+    keepAliveTimeout: 0
+    enableStreaming: true
+    logging:
+      level: "info"
+      format: "json"
+      includeCorrelationId: true
+
+  environment:
+    AZURE_SUBSCRIPTION_ID: "${AZURE_SUBSCRIPTION_ID}"
+    AZURE_TENANT_ID: "${AZURE_TENANT_ID}"
+    AZURE_CLIENT_ID: "${AZURE_CLIENT_ID}"
+    AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET}"
+    PYTHON_PATH: "/usr/bin/python3"
+    POWERSHELL_PATH: "/usr/bin/pwsh"
+
+  tools:
+    assessment:
+      script: "./tools/assessment/runAssessment.ps1"
+      type: "powershell"
+      longRunning: true
+    export:
+      script: "./tools/export/runExport.ps1"
+      type: "powershell"
+      longRunning: true
+    refactor:
+      script: "./tools/refactor/refactor.py"
+      type: "python"
+      longRunning: false
+
+  progress_channels:
+    - "assessment-progress"
+    - "migration-progress"
+    - "refactor-progress"
+    - "workflow-progress"
+
+  security:
+    validateInputs: true
+    sanitizeScriptParams: true
+    blockHardcodedSecrets: true
+    allowManagedIdentity: true
+
+  deployment:
+    target: "azure-container-app"
+    container:
+      image: "azurecr.io/mcp/aztf-migration:latest"
+      cpu: "1.0"
+      memory: "2Gi"
+      ingress: "external"
+      envFromAzure:
+        - "KeyVault"
+        - "ContainerAppSecrets"
+
+# ============================================================
+# C. UI SERVICE INTEGRATION (ai-aztfexport-ui/app/service)
+# ============================================================
+ui_services:
+  module_root: "ai-aztfexport-ui/app/service"
+
+  services:
+    assessmentService:
+      file: "assessmentService.js"
+      endpoints:
+        start: "/mcp/assessment/start"
+        progress: "/mcp/assessment/progress"
+        status: "/mcp/assessment/status"
+      features:
+        - "real-time progress"
+        - "error surface to UI terminal"
+        - "structured logging"
+
+    migrationService:
+      file: "migrationService.js"
+      endpoints:
+        start: "/mcp/migration/start"
+        progress: "/mcp/migration/progress"
+        status: "/mcp/migration/status"
+      features:
+        - "long-running script support"
+        - "streamed updates"
+        - "UI terminal logging"
+
+    refactorService:
+      file: "refactorService.js"
+      endpoints:
+        start: "/mcp/refactor/start"
+        progress: "/mcp/refactor/progress"
+        status: "/mcp/refactor/status"
+      features:
+        - "python script integration"
+        - "real-time progress"
+        - "error + log forwarding"
+
+  ui_logging:
+    enableTerminalLogs: true
+    showUserFriendlyErrors: true
+    includeCorrelationId: true
+    logLevels:
+      - "info"
+      - "warn"
+      - "error"

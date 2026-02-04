@@ -1,0 +1,186 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+
+export type AgentType = 'orchestrator' | 'assessment' | 'migration' | 'refactoring' | 'summary';
+
+export interface AgentState {
+  id: AgentType;
+  status: 'idle' | 'processing' | 'success' | 'failed';
+  logs: string[];
+  progress?: number;
+  data?: any;
+}
+
+export type StreamStatus = 'connected' | 'disconnected' | 'reconnecting' | 'offline';
+
+interface UseAgentStreamReturn {
+  agents: Record<AgentType, AgentState>;
+  activeAgent: AgentType | null;
+  streamStatus: StreamStatus;
+  startOrchestration: (command: string) => void;
+  reconnect: () => void;
+  setActiveAgent: (id: AgentType) => void;
+  terminalLogs: string[]; // Global aggregated logs
+}
+
+const INITIAL_AGENTS: Record<AgentType, AgentState> = {
+  orchestrator: { id: 'orchestrator', status: 'idle', logs: [] },
+  assessment: { id: 'assessment', status: 'idle', logs: [] },
+  migration: { id: 'migration', status: 'idle', logs: [] },
+  refactoring: { id: 'refactoring', status: 'idle', logs: [] },
+  summary: { id: 'summary', status: 'idle', logs: [] }
+};
+
+export function useAgentStream(): UseAgentStreamReturn {
+  const [agents, setAgents] = useState<Record<AgentType, AgentState>>(INITIAL_AGENTS);
+  const [activeAgent, setActiveAgent] = useState<AgentType | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>('disconnected');
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Helper to update specific agent state
+  const updateAgent = useCallback((id: AgentType, updates: Partial<AgentState>) => {
+    setAgents(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates }
+    }));
+  }, []);
+
+  // Helper to append logs
+  const addLog = useCallback((id: AgentType, message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const formattedLog = `[${timestamp}] [${id.toUpperCase()}] ${message}`;
+    
+    setTerminalLogs(prev => [...prev, formattedLog]);
+    setAgents(prev => ({
+      ...prev,
+      [id]: { ...prev[id], logs: [...prev[id].logs, formattedLog] }
+    }));
+  }, []);
+
+  const connect = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    setStreamStatus('reconnecting');
+
+    // Replace with your actual SSE endpoint
+    const sseUrl = '/api/stream'; // Or your MCP server endpoint
+    
+    try {
+      // In a real scenario, this might point to a backend proxy or direct to MCP
+      // For demo purposes, we'll assume a local proxy or mock
+      const es = new EventSource(sseUrl);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        setStreamStatus('connected');
+        addLog('orchestrator', 'Connected to Aztra Neural Core.');
+      };
+
+      es.onerror = (err) => {
+        console.error('SSE Error:', err);
+        setStreamStatus('offline');
+        // Optional: Retry logic
+        es.close();
+      };
+
+      // Event Listeners for specific Agent events
+      
+      // Orchestrator Events
+      es.addEventListener('orchestration', (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        setActiveAgent('orchestrator');
+        updateAgent('orchestrator', { status: 'processing', data: data.payload });
+        addLog('orchestrator', data.message || 'Processing intent...');
+        
+        if (data.status === 'completed') {
+            updateAgent('orchestrator', { status: 'success' });
+        }
+      });
+
+      // Assessment Events
+      es.addEventListener('assessment', (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        setActiveAgent('assessment');
+        if (data.status === 'started') updateAgent('assessment', { status: 'processing' });
+        if (data.status === 'completed') updateAgent('assessment', { status: 'success', data: data.reportUrl });
+        if (data.message) addLog('assessment', data.message);
+      });
+
+      // Migration Events
+      es.addEventListener('migration', (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        setActiveAgent('migration');
+        updateAgent('migration', { 
+            status: 'processing', 
+            progress: data.progress 
+        });
+        if (data.message) addLog('migration', data.message);
+        if (data.status === 'completed') updateAgent('migration', { status: 'success', progress: 100 });
+      });
+
+      // Refactoring Events
+      es.addEventListener('refactoring', (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        setActiveAgent('refactoring');
+        updateAgent('refactoring', { status: 'processing' });
+        if (data.message) addLog('refactoring', data.message);
+        if (data.status === 'completed') updateAgent('refactoring', { status: 'success' });
+      });
+
+      // Summary Events
+      es.addEventListener('summary', (event: MessageEvent) => {
+        const data = JSON.parse(event.data);
+        setActiveAgent('summary');
+        updateAgent('summary', { status: 'success' });
+        addLog('summary', 'Workflow completed successfully.');
+      });
+
+      // System Events
+      es.addEventListener('local_mcp_offline', () => {
+        setStreamStatus('offline');
+        addLog('orchestrator', 'CRITICAL: Local MCP Server is offline.');
+      });
+
+    } catch (e) {
+      setStreamStatus('offline');
+    }
+  }, [addLog, updateAgent]);
+
+  // Clean up on unmount
+  useEffect(() => {
+    connect();
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, [connect]);
+
+  const startOrchestration = (command: string) => {
+    // Reset states
+    setAgents(INITIAL_AGENTS);
+    setTerminalLogs([]);
+    setActiveAgent('orchestrator');
+    updateAgent('orchestrator', { status: 'processing' });
+    
+    // Send command to backend (POST) which triggers the SSE logic there
+    fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: command })
+    }).catch(err => {
+        addLog('orchestrator', `Command failed: ${err.message}`);
+        updateAgent('orchestrator', { status: 'failed' });
+    });
+  };
+
+  return {
+    agents,
+    activeAgent,
+    streamStatus,
+    startOrchestration,
+    reconnect: connect,
+    setActiveAgent, // Allows UI to manually switch view
+    terminalLogs
+  };
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "azure-terraform": {
+      "command": "node",
+      "args": ["C:\\Users\\sunsu\\OneDrive\\Desktop\\Sundeep\\AI-Projects\\ai-Repository\\Generative-AI-Projects\\aiaNextGen-Products\\ai-agents\\az-tf-migration\\apps-mcp-server\\index.js"],
+      "env": {
+        "AZURE_STORAGE_CONNECTION_STRING": "your-connection-string",
+        "GITHUB_TOKEN": "your-github-token-here"
+      }
+    }
+  }
+}

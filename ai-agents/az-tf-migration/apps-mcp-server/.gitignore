@@ -1,0 +1,27 @@
+# Environment variables with secrets
+.env
+.env.local
+.env.*.local
+
+# Sensitive configuration files
+claude-desktop-config.json
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+
+# Azure credentials
+*.pem
+*.pfx

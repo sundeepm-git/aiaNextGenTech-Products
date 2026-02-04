@@ -1,0 +1,64 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Node/JavaScript
+node_modules/
+dist/
+build/
+.out/
+.next/
+.cache/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+*.tgz
+
+# Logs
+logs/
+log/
+*.log
+
+# Env files (keep examples)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Terraform (keep lock file)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+.terraformrc
+terraform.rc
+!.terraform.lock.hcl
+
+# Azure Functions/local dev
+local.settings.json
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Project-specific MCP server (logs handled above)
+ai-agents/az-tf-migration/apps-mcp-server/.cache/

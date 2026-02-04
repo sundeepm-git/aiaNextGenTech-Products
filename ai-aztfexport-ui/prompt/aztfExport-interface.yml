@@ -1,0 +1,61 @@
+project: "Agentic Azure to Terraform Migration"
+architecture_type: "SSE-driven"
+role: "Staff Software Engineer and UX Architect"
+objective: "Architect a Next.js 14+ dashboard for 'Agentic Azure to Terraform Migration', a tool that orchestrates 5 sequential AI agents via SSE streams."
+
+architectural_patterns:
+  sse_stream_handling:
+    description: "Implement a custom `useAgentStream` hook to manage the `EventSource` connection."
+    requirement: "UI must parse incoming chunks and route them to the specific Agent's terminal window or progress bar based on the event type."
+  independent_reentry:
+    description: "Every agent card must have a 'Re-run' button."
+    requirement: "UI should allow a user to manually trigger specific agents (e.g., Code Refactoring) using existing data without restarting the chain."
+
+ui_components:
+  foundry_command_center:
+    nlp_input: "Command-line style input with Voice Support (Visualizer waveform) and Prompt Suggestions."
+    orchestrator_preview: "Glassmorphism card showing the validated JSON object after NLP parsing."
+  agent_pipeline:
+    style: "Linear Progress Track with 5 sequential nodes."
+    states: 
+      - "Idle (Gray)"
+      - "Processing (Pulsing Blue)"
+      - "Success (Green)"
+      - "Failed (Red)"
+    interaction: "Clicking a node filters the Global Terminal to show only that agent's logs."
+
+feature_requirements:
+  live_terminal:
+    tech_stack: "xterm.js or custom React component."
+    features: "High-frequency updates from SSE stream, Auto-scroll to bottom."
+  storage_insight_dashboard:
+    quick_stats: ["Total Migrations", "Refactor Success Rate", "Storage Occupancy"]
+    file_explorer: "Widget showing `aztf-coderefactor` folder structure from Azure Storage."
+  connectivity_guard:
+    function: "Persistent status indicator for Local MCP Server."
+    error_handling: "Trigger 'Critical Error' toast on `local_mcp_offline` event with 'Reconnect via ngrok' option."
+
+design_system:
+  theme: "Deep Charcoal with Cyan and Emerald accents."
+  typography:
+    ui: "Inter"
+    terminal: "JetBrains Mono"
+  interactions: "Framer Motion for agent card transitions."
+
+state_management_strategy:
+  mappings:
+    - agent: "Orchestrator"
+      ui_action: "Parse NLP -> Render JSON"
+      storage_interaction: "Save intent to history"
+    - agent: "Assessment"
+      ui_action: "Trigger 'MCP Pulse' -> Show HTML Link"
+      storage_interaction: "Upload report to Blob"
+    - agent: "Migration"
+      ui_action: "Start 0-100% Progress Bar"
+      storage_interaction: "Stream status to metadata"
+    - agent: "Refactoring"
+      ui_action: "Diff View (Old vs New Code)"
+      storage_interaction: "Write to `aztf-coderefactor`"
+    - agent: "Summary"
+      ui_action: "Final Modal + Output Location URL"
+      storage_interaction: "Read all logs for summary"
