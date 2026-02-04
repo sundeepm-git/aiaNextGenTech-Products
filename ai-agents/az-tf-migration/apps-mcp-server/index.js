@@ -27,6 +27,12 @@ import { assessmentToolDefinition, assessmentToolHandler, initializeBlobStorage,
 import { aztfexportToolDefinition, aztfexportToolHandler, executeExportJob as executeAzTfExportJob } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
 
+if(!isStdioMode) {
+    console.error(`[Tool Registration] Assessment: ${assessmentToolDefinition?.name || 'MISSING'}`);
+    console.error(`[Tool Registration] Export: ${aztfexportToolDefinition?.name || 'MISSING'}`);
+    console.error(`[Tool Registration] Refactor: ${refactorToolDefinition?.name || 'MISSING'}`);
+}
+
 const blobStorageInfo = await initializeBlobStorage(isStdioMode);
 
 // --- REPORT DIRECTORY DETECTION ---
@@ -79,6 +85,11 @@ server.tool(assessmentToolDefinition.name, assessmentToolDefinition.schema, (p) 
 server.tool(aztfexportToolDefinition.name, aztfexportToolDefinition.schema, (p) => aztfexportToolHandler(p, toolContext));
 server.tool(refactorToolDefinition.name, refactorToolDefinition.schema, (p) => refactorToolHandler(p, toolContext));
 
+if(!isStdioMode) {
+    console.error(`[Server] Registered tools: ${server.listTools ? 'listTools available' : 'listTools NOT available'}`);
+    console.error(`[Server] Total tools registered: 3`);
+}
+
 // --- APP SETUP ---
 const app = express();
 
@@ -96,7 +107,40 @@ let activeSseTransport = null;
 
 // --- ENDPOINTS ---
 
+// Health endpoint
+app.get("/health", (req, res) => {
+    res.json({ 
+        status: "healthy", 
+        timestamp: new Date().toISOString(),
+        tools: [
+            assessmentToolDefinition.name,
+            aztfexportToolDefinition.name,
+            refactorToolDefinition.name
+        ]
+    });
+});
 
+// Tools list endpoint for debugging
+app.get("/tools", (req, res) => {
+    res.json({
+        registered_tools: [
+            {
+                name: assessmentToolDefinition.name,
+                description: assessmentToolDefinition.schema.description
+            },
+            {
+                name: aztfexportToolDefinition.name,
+                description: aztfexportToolDefinition.schema.description
+            },
+            {
+                name: refactorToolDefinition.name,
+                description: refactorToolDefinition.schema.description
+            }
+        ],
+        blob_storage: blobStorageInfo ? "initialized" : "not initialized",
+        local_report_dir: localReportDir
+    });
+});
 
 app.get("/sse", async (req, res) => {
     console.error(`[${new Date().toISOString()}] SSE connection attempt`);

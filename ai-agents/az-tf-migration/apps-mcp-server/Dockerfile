@@ -13,6 +13,14 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     pwsh -v
 
+# 2.5. Install Python 3 and pip for refactor engine
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip python3-venv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    python3 --version && \
+    pip3 --version
+
 # 3. Install Azure PowerShell Modules
 RUN pwsh -Command "Set-PSRepository -Name PSGallery -InstallationPolicy Trusted" && \
     pwsh -Command "Install-Module -Name Az.Accounts -Force -AllowClobber -Scope AllUsers" && \
@@ -29,6 +37,11 @@ RUN npm ci --omit=dev --ignore-scripts && \
 
 # 6. Copy the rest of the app
 COPY . .
+
+# 6.5. Install Python dependencies for refactor engine
+RUN if [ -f python/requirements.txt ]; then \
+    pip3 install --no-cache-dir -r python/requirements.txt; \
+    fi
 
 # Ensure ps folder is at /app/ps, not /app/ps/ps
 RUN if [ -d "/app/ps/ps" ]; then mv /app/ps/ps/* /app/ps/ && rmdir /app/ps/ps; fi
