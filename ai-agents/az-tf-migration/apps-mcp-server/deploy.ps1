@@ -395,9 +395,9 @@ try {
             docker rm aztf-mcp-test 2>$null
             
             Write-Status "Starting container on port 8080..." -Type Info
-            docker run -d --name aztf-mcp-test -p 8080:8080 "${IMAGE_NAME}:${IMAGE_TAG}"
+            docker run -d --name aztf-mcp-test -p 8080:8080 -e PORT=8080 "${IMAGE_NAME}:${IMAGE_TAG}"
             
-            Wait-ForDeployment "Waiting for container to start" 10
+            Wait-ForDeployment "Waiting for container to start" 15
             
             # Test health endpoint
             Write-Status "Testing /health endpoint..." -Type Info
