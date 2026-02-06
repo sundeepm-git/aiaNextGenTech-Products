@@ -62,3 +62,31 @@ temp/
 
 # Project-specific MCP server (logs handled above)
 ai-agents/az-tf-migration/apps-mcp-server/.cache/
+# Azure export output directory (Terraform files)
+azure-export/
+**/azure-export/
+az-tf-migration
+
+
+# Sensitive configuration files
+claude-desktop-config.json
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+
+# Azure credentials
+*.pem
+*.pfx
