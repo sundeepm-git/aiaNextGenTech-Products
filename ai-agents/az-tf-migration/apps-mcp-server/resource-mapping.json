@@ -1,0 +1,18 @@
+{
+  "/subscriptions/d0f1884d-1f98-4bf1-9e15-e2986fc1bca2/resourceGroups/rg-mcp-servers/providers/Microsoft.ContainerRegistry/registries/aztfmcpacr": {
+    "resource_name": "aztfmcpacr",
+    "resource_type": "azurerm_container_registry"
+  },
+  "/subscriptions/d0f1884d-1f98-4bf1-9e15-e2986fc1bca2/resourceGroups/rg-mcp-servers/providers/Microsoft.App/managedEnvironments/mcp-aca-env": {
+    "resource_name": "mcp-aca-env",
+    "resource_type": "azurerm_container_app_environment"
+  },
+  "/subscriptions/d0f1884d-1f98-4bf1-9e15-e2986fc1bca2/resourceGroups/rg-mcp-servers/providers/Microsoft.Storage/storageAccounts/samcpstorage": {
+    "resource_name": "samcpstorage",
+    "resource_type": "azurerm_storage_account"
+  },
+  "/subscriptions/d0f1884d-1f98-4bf1-9e15-e2986fc1bca2/resourceGroups/rg-mcp-servers/providers/Microsoft.App/containerApps/aztf-mcp-app": {
+    "resource_name": "aztf-mcp-app",
+    "resource_type": "azurerm_container_app"
+  }
+}

@@ -51,33 +51,22 @@ export async function executeExportJob(job, __dirname, progressCallback = null) 
       job.resourceGroup
     ];
 
-    // Add StorageAccount parameter from environment variable
-    const storageAccount = env.storageAccount?.trim().replace(/\s*=\s*/g, '').trim();
-    console.error(`[Export Job ${job.id}] Environment storageAccount: '${env.storageAccount}'`);
-    console.error(`[Export Job ${job.id}] Processed storageAccount: '${storageAccount}'`);
-    
-    if (storageAccount) {
-      psArgs.push('-StorageAccount', storageAccount);
-      console.error(`[Export Job ${job.id}] Added -StorageAccount parameter: ${storageAccount}`);
-    } else {
-      console.error(`[Export Job ${job.id}] WARNING: StorageAccount environment variable is not set or empty`);
-      console.error(`[Export Job ${job.id}] Script will likely fail - StorageAccount is required`);
-    }
+    // Storage account will be read from .env file by the PowerShell script
+    // No need to pass it as a parameter - the script loads it from environment variables
 
     const psExecutable = "pwsh";
 
     console.error(`[Export Job ${job.id}] Starting PowerShell: ${psExecutable} ${psArgs.join(' ')}`);
 
     await new Promise((resolve, reject) => {
-      // Spawn PowerShell process with environment variables
+      // Spawn PowerShell process with environment variables (including storageAccount from .env)
       const ps = spawn(psExecutable, psArgs, {
         env: {
-          ...process.env,  // Inherit all environment variables including storageAccount
-          storageAccount: storageAccount  // Explicitly pass storageAccount
+          ...process.env  // Inherit all environment variables including storageAccount from .env
         }
       });
       
-      ps.stdout.on('data', (data) => { 
+      ps.stdout.on('data', (data) => {
         job.stdout += data.toString();
         const output = data.toString();
         // Log full output for debugging
@@ -174,6 +163,25 @@ export const aztfexportToolDefinition = {
 };
 
 export async function aztfexportToolHandler({ subscriptionId, resourceGroup }, context) {
+  // Input validation
+  if (!subscriptionId || typeof subscriptionId !== 'string' || subscriptionId.trim() === '') {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `Error: 'subscriptionId' is required and must be a non-empty string.`
+      }]
+    };
+  }
+  if (!resourceGroup || typeof resourceGroup !== 'string' || resourceGroup.trim() === '') {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `Error: 'resourceGroup' is required and must be a non-empty string.`
+      }]
+    };
+  }
   const { jobs, executeExportJob, blobStorageInfo } = context;
 
   try {

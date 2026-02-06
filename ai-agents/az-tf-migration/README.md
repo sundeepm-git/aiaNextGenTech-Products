@@ -147,12 +147,45 @@ REFACTOR_SCRIPT_PATH=./python/refactor.py
 
 ## 4. Installation & Local Setup
 
+
 ### Prerequisites
 *   **Node.js**: 18+
 *   **PowerShell**: 7.x
-*   **Azure CLI**: Latest (`az login` required)
+*   **Azure CLI**: Latest
 *   **Python**: 3.8+ with `pip install requests python-dotenv azure-storage-blob azure-identity`
 *   **aztfexport**: Installed and in PATH
+
+#### Azure Authentication (Required for Automation/Production)
+
+For all automation, CI/CD, and production scenarios, you **must** use a Service Principal (SPN) for Azure CLI authentication. This ensures secure, non-interactive access.
+
+1. **Create a Service Principal:**
+  ```bash
+  az ad sp create-for-rbac --name <sp-name> --role Contributor --scopes /subscriptions/<subscription-id>
+  ```
+  Note the `appId`, `password`, and `tenant` from the output.
+
+2. **Set the following environment variables before running any scripts:**
+  ```bash
+  export AZURE_CLIENT_ID=<appId>
+  export AZURE_CLIENT_SECRET=<password>
+  export AZURE_TENANT_ID=<tenant>
+  ```
+  On Windows (PowerShell):
+  ```powershell
+  $env:AZURE_CLIENT_ID = "<appId>"
+  $env:AZURE_CLIENT_SECRET = "<password>"
+  $env:AZURE_TENANT_ID = "<tenant>"
+  ```
+
+3. **The script will automatically attempt SPN login if these variables are set.**
+
+4. For local development, you may use `az login` interactively, but using SPN is recommended for consistency.
+
+5. Example SPN login command (for reference):
+  ```bash
+  az login --service-principal -u <appId> -p <password> --tenant <tenant>
+  ```
 
 ### Server Modes
 

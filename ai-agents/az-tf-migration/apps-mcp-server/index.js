@@ -13,7 +13,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 config({ path: path.join(__dirname, '.env') });
 
-const isStdioMode = !process.stdin.isTTY || process.argv.includes('--stdio');
+// Only enable STDIO mode if explicitly requested via env or flag
+// STDIO mode is only enabled if explicitly requested via the STDIO_MODE env variable or --stdio flag.
+// In Azure Container Apps, this will default to HTTP/SSE mode and always start the Express server.
+const isStdioMode = process.env.STDIO_MODE === 'true' || process.argv.includes('--stdio');
 const PORT = process.env.PORT || 3000;
 
 // --- MCP SERVER ---
@@ -23,6 +26,7 @@ const server = new McpServer({
 });
 
 // --- TOOL REGISTRATION ---
+// Log environment details only in HTTP/SSE mode (not STDIO mode)
 if(!isStdioMode) {
     console.error(`[Environment] Node Version: ${process.version}`);
     console.error(`[Environment] Platform: ${process.platform}`);
@@ -34,6 +38,7 @@ import { assessmentToolDefinition, assessmentToolHandler, initializeBlobStorage,
 import { aztfexportToolDefinition, aztfexportToolHandler, executeExportJob as executeAzTfExportJob } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
 
+// Log tool registration only in HTTP/SSE mode
 if(!isStdioMode) {
     console.error(`[Tool Registration] Assessment: ${assessmentToolDefinition?.name || 'MISSING'}`);
     console.error(`[Tool Registration] Export: ${aztfexportToolDefinition?.name || 'MISSING'}`);
@@ -213,9 +218,14 @@ app.post("/messages", async (req, res) => {
 });
 
 // --- START ---
+// In Azure Container Apps, STDIO mode should NOT be enabled. The Express server will always start.
 if (isStdioMode) {
+    // STDIO mode: used for local CLI/pipe integration only
+    console.error("[Startup Mode] STDIO mode enabled (local CLI/pipe)");
     server.connect(new StdioServerTransport());
 } else {
+    // HTTP/SSE mode: used for Azure Container Apps and local web server
+    console.error("[Startup Mode] HTTP/SSE mode enabled (Azure Container App or local web)");
     app.listen(PORT, '0.0.0.0', () => {
         console.error(`\n🚀 Azure MCP Server running on http://127.0.0.1:${PORT}`);
         console.error(`🔗 SSE URL: http://127.0.0.1:${PORT}/sse`);

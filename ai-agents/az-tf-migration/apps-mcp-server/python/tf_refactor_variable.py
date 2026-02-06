@@ -1,3 +1,40 @@
+import sys
+
+# --- Always login with SPN if env vars are set ---
+def ensure_azure_spn_login():
+    import subprocess, os, json
+    client_id = os.environ.get('AZURE_CLIENT_ID')
+    client_secret = os.environ.get('AZURE_CLIENT_SECRET')
+    tenant_id = os.environ.get('AZURE_TENANT_ID')
+    # Check if already logged in
+    try:
+        result = subprocess.run(['az', 'account', 'show', '--output', 'json'], capture_output=True, text=True, check=True)
+        # Optionally, check if the logged-in user is the SPN
+        account = json.loads(result.stdout)
+        if account.get('user', {}).get('type') == 'servicePrincipal':
+            return  # Already logged in as SPN
+    except Exception:
+        pass
+    # Not logged in or not as SPN, try SPN login
+    if client_id and client_secret and tenant_id:
+        print("Logging in to Azure CLI using Service Principal...")
+        login_cmd = [
+            'az', 'login', '--service-principal',
+            '-u', client_id, '-p', client_secret, '--tenant', tenant_id
+        ]
+        result = subprocess.run(login_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("ERROR: Azure CLI SPN login failed:")
+            print(result.stderr)
+            sys.exit(1)
+        print("Azure CLI SPN login successful.")
+    else:
+        print("ERROR: Not logged in to Azure CLI and SPN environment variables are not set.")
+        print("Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID.")
+        sys.exit(1)
+
+# Ensure SPN login at script start
+ensure_azure_spn_login()
 # =============================================================
 # Name: sundeep k maheshwari
 # Date: 2026-01-21

@@ -193,16 +193,18 @@ export async function executeAssessmentJob(job, localReportDir, __dirname) {
     if (!resolvedScript) resolvedScript = normalizeSep(scriptPath);
 
     let psArgs = [
-      '-NoProfile', 
-      '-ExecutionPolicy', 
-      'Bypass', 
-      '-File', 
-      resolvedScript, 
-      '-SubscriptionId', 
-      job.subscriptionId,
-      '-ResourceGroupName',
-      job.resourceGroup
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      resolvedScript,
+      '-SubscriptionId',
+      job.subscriptionId
     ];
+    // Only add -ResourceGroupName if provided and not empty/undefined/null
+    if (job.resourceGroup && typeof job.resourceGroup === 'string' && job.resourceGroup.trim() !== '') {
+      psArgs.push('-ResourceGroupName', job.resourceGroup);
+    }
 
     const psExecutable = "pwsh";
 
@@ -313,15 +315,25 @@ export async function executeAssessmentJob(job, localReportDir, __dirname) {
 // --- TOOL DEFINITION ---
 export const assessmentToolDefinition = {
   name: "assess_azure_environment",
-  description: "Assess an Azure subscription and resource group for Terraform migration readiness. Returns a Job ID for tracking the long-running assessment.",
+  description: "Assess an Azure subscription and (optionally) a resource group for Terraform migration readiness. Returns a Job ID for tracking the long-running assessment.",
   schema: {
     subscriptionId: z.string().describe("The Azure Subscription ID to assess"),
-    resourceGroup: z.string().describe("The specific Resource Group to assess")
+    resourceGroup: z.string().optional().describe("The specific Resource Group to assess (optional)")
   }
 };
 
 // --- TOOL HANDLER ---
-export async function assessmentToolHandler({ subscriptionId, resourceGroup }, context) {
+export async function assessmentToolHandler({ subscriptionId, resourceGroup = undefined }, context) {
+  // Input validation
+  if (!subscriptionId || typeof subscriptionId !== 'string' || subscriptionId.trim() === '') {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `Error: 'subscriptionId' is required and must be a non-empty string.`
+      }]
+    };
+  }
   const { jobs, executeJob, blobStorageInfo } = context;
 
   try {

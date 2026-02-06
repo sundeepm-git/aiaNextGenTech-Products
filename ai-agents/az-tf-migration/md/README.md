@@ -218,6 +218,35 @@ blockHardcodedSecrets(codeContent);
 
 ---
 
+
+## MCP Testing: STDIO_MODE Logic
+
+The MCP server supports two modes of operation, controlled by the `STDIO_MODE` environment variable in your `.env` file:
+
+- **STDIO_MODE=true**: Enables CLI/pipe (STDIO) mode. This is recommended for integration with Claude Desktop or other tools that communicate via standard input/output. In this mode, the Express HTTP server is NOT started, and all communication is via STDIO.
+- **STDIO_MODE=false** (default): Enables HTTP/SSE mode. This is required for Azure Container Apps deployments and for use with MCP Inspector or any web-based client. The Express server and all endpoints (e.g., `/health`, `/tools`) are available.
+
+**How to use:**
+
+1. Open your `.env` file in the project root.
+2. Set `STDIO_MODE=true` to enable STDIO mode, or `STDIO_MODE=false` (or leave unset) for HTTP/SSE mode.
+3. Restart the server after changing this value.
+
+**Example .env:**
+```dotenv
+# For STDIO mode (local CLI/pipe)
+STDIO_MODE=true
+
+# For HTTP/SSE mode (Azure/web)
+STDIO_MODE=false
+```
+
+**Behavior summary:**
+- In Azure Container Apps, always use HTTP/SSE mode (`STDIO_MODE=false`).
+- For local CLI/pipe integration, use STDIO mode (`STDIO_MODE=true`).
+- The server will auto-detect the mode at startup and log the selected mode.
+
+---
 ## Running Locally
 
 ### Option 1: Stdio Mode (Recommended - Claude Desktop)

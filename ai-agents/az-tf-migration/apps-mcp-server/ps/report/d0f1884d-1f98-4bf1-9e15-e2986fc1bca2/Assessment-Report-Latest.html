@@ -55,11 +55,11 @@
                 <div class="section-title">Assessment Summary</div>
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="stat-number">5</div>
+                        <div class="stat-number">12</div>
                         <div class="stat-label">Total Resources</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-number">5</div>
+                        <div class="stat-number">12</div>
                         <div class="stat-label">Managed Resources</div>
                     </div>
                     <div class="stat-card">
@@ -77,11 +77,11 @@
                         <tr><th>Metric</th><th>Value</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>Total Resources</td><td><strong>5</strong></td></tr>
-                        <tr><td>Managed (Workload)</td><td><span class="status-managed">5</span></td></tr>
+                        <tr><td>Total Resources</td><td><strong>12</strong></td></tr>
+                        <tr><td>Managed (Workload)</td><td><span class="status-managed">12</span></td></tr>
                         <tr><td>Reference (Platform)</td><td><span class="status-reference">0</span></td></tr>
                         <tr class='success'><td><strong>Decision</strong></td><td><strong>Strong Candidate</strong></td></tr>
-                        <tr><td>Recommendation</td><td>Contains 5 supported workload resources. Use 'aztfexport' to codify.</td></tr>
+                        <tr><td>Recommendation</td><td>Contains 12 supported workload resources. Use 'aztfexport' to codify.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -89,19 +89,31 @@
             <!-- Managed Resources by Type -->
             <div class="section">
                 <div class="section-title">Managed Resources by Type</div>                <div class="type-count">
+                    <span class="type-name">Microsoft.MachineLearningServices/workspaces</span>
+                    <span class="type-number">2</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.OperationalInsights/workspaces</span>
+                    <span class="type-number">2</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.Storage/storageAccounts</span>
+                    <span class="type-number">2</span>
+                </div>                <div class="type-count">
                     <span class="type-name">Microsoft.App/containerApps</span>
                     <span class="type-number">1</span>
                 </div>                <div class="type-count">
                     <span class="type-name">Microsoft.App/managedEnvironments</span>
                     <span class="type-number">1</span>
                 </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.CognitiveServices/accounts</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
+                    <span class="type-name">Microsoft.CognitiveServices/accounts/projects</span>
+                    <span class="type-number">1</span>
+                </div>                <div class="type-count">
                     <span class="type-name">Microsoft.ContainerRegistry/registries</span>
                     <span class="type-number">1</span>
                 </div>                <div class="type-count">
-                    <span class="type-name">Microsoft.OperationalInsights/workspaces</span>
-                    <span class="type-number">1</span>
-                </div>                <div class="type-count">
-                    <span class="type-name">Microsoft.Storage/storageAccounts</span>
+                    <span class="type-name">Microsoft.KeyVault/vaults</span>
                     <span class="type-number">1</span>
                 </div>            </div>
             
@@ -121,6 +133,41 @@
                         </tr>
                     </thead>
                     <tbody>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>smstorageaccount0014</td>
+                            <td>Microsoft.Storage/storageAccounts</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>smkeyvault0014</td>
+                            <td>Microsoft.KeyVault/vaults</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>law79ncjo</td>
+                            <td>Microsoft.OperationalInsights/workspaces</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>sm-fdry-hub-dev-0014</td>
+                            <td>Microsoft.MachineLearningServices/workspaces</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>sm-fdry-hub-project-dev-0014</td>
+                            <td>Microsoft.MachineLearningServices/workspaces</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>fndry-new-interface-001-resource</td>
+                            <td>Microsoft.CognitiveServices/accounts</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
+                            <td>rg-genai-infra-0014</td>
+                            <td>fndry-new-interface-001-resource/fndry-new-interface-001</td>
+                            <td>Microsoft.CognitiveServices/accounts/projects</td>
+                            <td><span class="status-managed">Managed</span></td>
+                        </tr>                        <tr>
                             <td>rg-mcp-servers</td>
                             <td>workspace-rgmcpserversIh7a</td>
                             <td>Microsoft.OperationalInsights/workspaces</td>
@@ -154,7 +201,7 @@
         </div>
         
         <div class="footer">
-            <p>Report Generated: 2026-02-04 21:44:55</p>
+            <p>Report Generated: 2026-02-05 13:14:25</p>
             <p>Azure Subscription Assessment Tool</p>
         </div>
     </div>

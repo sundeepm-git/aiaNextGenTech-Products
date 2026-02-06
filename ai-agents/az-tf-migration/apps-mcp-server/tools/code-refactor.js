@@ -184,6 +184,25 @@ export async function executeRefactorJob(job, __dirname, progressCallback = null
 }
 
 export async function refactorToolHandler({ subscriptionId, resourceGroup, refactorOptions }, context) {
+  // Input validation
+  if (!subscriptionId || typeof subscriptionId !== 'string' || subscriptionId.trim() === '') {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `Error: 'subscriptionId' is required and must be a non-empty string.`
+      }]
+    };
+  }
+  if (!resourceGroup || typeof resourceGroup !== 'string' || resourceGroup.trim() === '') {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `Error: 'resourceGroup' is required and must be a non-empty string.`
+      }]
+    };
+  }
   const { jobs, executeRefactorJob, blobStorageInfo } = context;
 
   try {

@@ -9,7 +9,7 @@ UPDATES:
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string]$SubscriptionId,
-    [Parameter(Mandatory = $false)] [string[]]$ResourceGroupName
+    [Parameter()] [string[]]$ResourceGroupName
 )
 
 # ---------------------------------------------------------
@@ -57,13 +57,33 @@ try {
         Get-Location | Select-Object -ExpandProperty Path
     }
     
-    $ReportDir = Join-Path $RepoRoot "report"
-    if (!(Test-Path $ReportDir)) { 
-        Write-Output "[INFO] Creating report directory: $ReportDir"
-        New-Item $ReportDir -ItemType Directory -Force | Out-Null 
+    # Create report directory: for RG-level, use report/<resourceGroup>; for subscription-level, use report/<subscriptionId>
+    if ($ResourceGroupName -and $ResourceGroupName.Count -gt 0) {
+        $reportFolder = $ResourceGroupName[0]
+    } else {
+        $reportFolder = $SubscriptionId
     }
-    
+    $ReportDir = Join-Path $RepoRoot "report\$reportFolder"
+    if (!(Test-Path $ReportDir)) {
+        Write-Output "[INFO] Creating report directory: $ReportDir"
+        New-Item $ReportDir -ItemType Directory -Force | Out-Null
+    }
     Write-Output "[INFO] Report directory set to: $ReportDir"
+
+    # Validate resource group existence if provided
+    if ($ResourceGroupName -and $ResourceGroupName.Count -gt 0) {
+        $missingGroups = @()
+        foreach ($rg in $ResourceGroupName) {
+            try {
+                $null = Get-AzResourceGroup -Name $rg -ErrorAction Stop
+            } catch {
+                $missingGroups += $rg
+            }
+        }
+        if ($missingGroups.Count -gt 0) {
+            throw "Provided resource group(s) do not exist: $($missingGroups -join ', ')"
+        }
+    }
     
     # [COMMENTED OUT]
     # $script:LogFilePath = Join-Path $ReportDir "Assessment.log"
@@ -126,7 +146,7 @@ try {
 
     Write-Log "Discovering Resources..."
     Write-Log "Using exclusion.json as single source of truth for Reference resources"
-    $groups = if ($ResourceGroupName) { $ResourceGroupName | ForEach-Object { Get-AzResourceGroup -Name $_ } } else { Get-AzResourceGroup }
+    $groups = if ($ResourceGroupName -and $ResourceGroupName.Count -gt 0) { $ResourceGroupName | ForEach-Object { Get-AzResourceGroup -Name $_ } } else { Get-AzResourceGroup }
 
     foreach ($rg in $groups) {
         Write-Log "Scanning RG: $($rg.ResourceGroupName)"
@@ -198,7 +218,6 @@ try {
     # ---------------------------------------------------------
     # 7. REPORT GENERATION
     # ---------------------------------------------------------
-    $rgName = if ($ResourceGroupName -and $ResourceGroupName.Count -gt 0) { $ResourceGroupName[0] } else { "all" }
     # Use consistent filename (without timestamp) to ensure only latest report is kept
     $htmlPath = Join-Path $ReportDir "Assessment-Report-Latest.html"
     
@@ -452,57 +471,82 @@ try {
         
         # Upload to Azure Blob Storage (for "azure" or "both")
         if ($outputDest -eq "azure" -or $outputDest -eq "both") {
-            Write-Log "Uploading assessment report to Azure Blob Storage..."
-            
-            # Determine blob path based on resource group scope
             if ($ResourceGroupName -and $ResourceGroupName.Count -gt 0) {
-                # Single or multiple resource groups - store under subscription/resourcegroup
+                # Only upload inside the resource group folder, not at subscription level
+                Write-Log "Uploading resource group-level assessment report to Azure Blob Storage..."
                 $blobPath = "$SubscriptionId/$rgName"
-            } else {
-                # All resource groups - store under subscription/all
-                $blobPath = "$SubscriptionId/all"
-            }
-            $blobName = "$blobPath/Assessment-Report-Latest.html"
-            
-            try {
-                # Check if container exists, create if not
-                $containerExists = az storage container exists --account-name $storageAccount --name $assessmentFolder --auth-mode login --query "exists" --output tsv
-                if ($containerExists -eq "false") {
-                    Write-Log "Creating container: $assessmentFolder"
-                    az storage container create --account-name $storageAccount --name $assessmentFolder --auth-mode login | Out-Null
-                }
-                
-                # Clean up old HTML reports from this specific path (keep only the latest)
-                Write-Log "Cleaning up old HTML reports from blob storage path: $blobPath/"
+                $blobName = "$blobPath/Assessment-Report-Latest.html"
                 try {
-                    $existingBlobs = az storage blob list --account-name $storageAccount --container-name $assessmentFolder --prefix "$blobPath/" --auth-mode login --query "[?contains(name, '.html')].name" -o json 2>&1 | ConvertFrom-Json
-                    
-                    if ($existingBlobs -and $existingBlobs.Count -gt 0) {
-                        Write-Log "Found $($existingBlobs.Count) existing HTML report(s) - deleting..."
-                        foreach ($oldBlob in $existingBlobs) {
-                            Write-Log "  Deleting old report: $oldBlob"
-                            az storage blob delete --account-name $storageAccount --container-name $assessmentFolder --name $oldBlob --auth-mode login 2>&1 | Out-Null
-                        }
-                    } else {
-                        Write-Log "No old HTML reports found"
+                    $containerExists = az storage container exists --account-name $storageAccount --name $assessmentFolder --auth-mode login --query "exists" --output tsv
+                    if ($containerExists -eq "false") {
+                        Write-Log "Creating container: $assessmentFolder"
+                        az storage container create --account-name $storageAccount --name $assessmentFolder --auth-mode login | Out-Null
                     }
+                    Write-Log "Cleaning up old HTML reports from blob storage path: $blobPath/"
+                    try {
+                        $existingBlobs = az storage blob list --account-name $storageAccount --container-name $assessmentFolder --prefix "$blobPath/" --auth-mode login --query "[?contains(name, '.html')].name" -o json 2>&1 | ConvertFrom-Json
+                        if ($existingBlobs -and $existingBlobs.Count -gt 0) {
+                            Write-Log "Found $($existingBlobs.Count) existing HTML report(s) - deleting..."
+                            foreach ($oldBlob in $existingBlobs) {
+                                Write-Log "  Deleting old report: $oldBlob"
+                                az storage blob delete --account-name $storageAccount --container-name $assessmentFolder --name $oldBlob --auth-mode login 2>&1 | Out-Null
+                            }
+                        } else {
+                            Write-Log "No old HTML reports found"
+                        }
+                    } catch {
+                        Write-Log "WARNING: Could not clean up old reports: $_"
+                    }
+                    az storage blob upload `
+                        --account-name $storageAccount `
+                        --container-name $assessmentFolder `
+                        --name $blobName `
+                        --file $htmlPath `
+                        --auth-mode login `
+                        --overwrite true | Out-Null
+                    Write-Log "SUCCESS: Assessment report uploaded to Azure Blob Storage"
+                    Write-Log "Storage URL: https://$storageAccount.blob.core.windows.net/$assessmentFolder/$blobName"
                 } catch {
-                    Write-Log "WARNING: Could not clean up old reports: $_"
+                    Write-Log "WARNING: Failed to upload assessment report to Azure Blob Storage: $_"
                 }
-                
-                # Upload the new file
-                az storage blob upload `
-                    --account-name $storageAccount `
-                    --container-name $assessmentFolder `
-                    --name $blobName `
-                    --file $htmlPath `
-                    --auth-mode login `
-                    --overwrite true | Out-Null
-                
-                Write-Log "SUCCESS: Assessment report uploaded to Azure Blob Storage"
-                Write-Log "Storage URL: https://$storageAccount.blob.core.windows.net/$assessmentFolder/$blobName"
-            } catch {
-                Write-Log "WARNING: Failed to upload assessment report to Azure Blob Storage: $_"
+            } elseif (-not ($ResourceGroupName) -or $ResourceGroupName.Count -eq 0) {
+                # Only upload at subscription level if no resource group is specified
+                Write-Log "Uploading subscription-level assessment report to Azure Blob Storage..."
+                $blobPath = "$SubscriptionId/all"
+                $blobName = "$blobPath/Assessment-Report-Latest.html"
+                try {
+                    $containerExists = az storage container exists --account-name $storageAccount --name $assessmentFolder --auth-mode login --query "exists" --output tsv
+                    if ($containerExists -eq "false") {
+                        Write-Log "Creating container: $assessmentFolder"
+                        az storage container create --account-name $storageAccount --name $assessmentFolder --auth-mode login | Out-Null
+                    }
+                    Write-Log "Cleaning up old HTML reports from blob storage path: $blobPath/"
+                    try {
+                        $existingBlobs = az storage blob list --account-name $storageAccount --container-name $assessmentFolder --prefix "$blobPath/" --auth-mode login --query "[?contains(name, '.html')].name" -o json 2>&1 | ConvertFrom-Json
+                        if ($existingBlobs -and $existingBlobs.Count -gt 0) {
+                            Write-Log "Found $($existingBlobs.Count) existing HTML report(s) - deleting..."
+                            foreach ($oldBlob in $existingBlobs) {
+                                Write-Log "  Deleting old report: $oldBlob"
+                                az storage blob delete --account-name $storageAccount --container-name $assessmentFolder --name $oldBlob --auth-mode login 2>&1 | Out-Null
+                            }
+                        } else {
+                            Write-Log "No old HTML reports found"
+                        }
+                    } catch {
+                        Write-Log "WARNING: Could not clean up old reports: $_"
+                    }
+                    az storage blob upload `
+                        --account-name $storageAccount `
+                        --container-name $assessmentFolder `
+                        --name $blobName `
+                        --file $htmlPath `
+                        --auth-mode login `
+                        --overwrite true | Out-Null
+                    Write-Log "SUCCESS: Assessment report uploaded to Azure Blob Storage"
+                    Write-Log "Storage URL: https://$storageAccount.blob.core.windows.net/$assessmentFolder/$blobName"
+                } catch {
+                    Write-Log "WARNING: Failed to upload assessment report to Azure Blob Storage: $_"
+                }
             }
         }
         
