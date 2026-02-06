@@ -25,3 +25,7 @@ temp/
 # Azure credentials
 *.pem
 *.pfx
+
+# Azure export output directory (Terraform files)
+azure-export/
+**/azure-export/
