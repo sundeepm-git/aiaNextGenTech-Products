@@ -90,3 +90,6 @@ temp/
 # Azure credentials
 *.pem
 *.pfx
+
+# Exclude the entire MCP server directory
+ai-agents/az-tf-migration/apps-mcp-server/azure-export
