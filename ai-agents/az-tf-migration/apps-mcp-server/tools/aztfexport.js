@@ -196,67 +196,38 @@ export async function aztfexportToolHandler({ subscriptionId, resourceGroup }, c
     console.error(`[Export Job ${jobId}] Created for subscription: ${subscriptionId}`);
     console.error(`[Export Job ${jobId}] Targeting Resource Group: ${resourceGroup}`);
 
-    // Execute export job with progress callback support
-    try {
-      // Progress callback that sends updates to all connected SSE clients
-      const progressCallback = (progressData) => {
-        if (job.progressCallbacks && job.progressCallbacks.length > 0) {
-          job.progressCallbacks.forEach(callback => {
-            try {
-              callback(progressData);
-            } catch (error) {
-              console.error(`[Export Job ${jobId}] Error in progress callback:`, error.message);
-            }
-          });
-        }
-      };
-      
-      await executeExportJob(job, progressCallback);
-      
-      // Job completed successfully
-      let storageMsg = '';
-      if (blobStorageInfo.available) {
-        storageMsg = `\n\n✓ Storage: Terraform files exported to '${blobStorageInfo.accountName}/aztfexport/${jobId}/'`;
+    // Execute export job asynchronously (fire-and-forget) to avoid MCP timeout
+    // Progress callback that sends updates to all connected SSE clients
+    const progressCallback = (progressData) => {
+      if (job.progressCallbacks && job.progressCallbacks.length > 0) {
+        job.progressCallbacks.forEach(callback => {
+          try {
+            callback(progressData);
+          } catch (error) {
+            console.error(`[Export Job ${jobId}] Error in progress callback:`, error.message);
+          }
+        });
       }
-      
-      if (job.status === 'completed') {
-        return {
-          content: [{
-            type: "text",
-            text: `✅ Export completed successfully!\n\nJob ID: ${jobId}\nSubscription: ${subscriptionId}\nResource Group: ${resourceGroup}\nStatus: ${job.status}${storageMsg}\n\nTerraform files are ready for use.`
-          }]
-        };
-      } else if (job.status === 'failed') {
-        return {
-          isError: true,
-          content: [{
-            type: "text",
-            text: `❌ Export failed!\n\nJob ID: ${jobId}\nSubscription: ${subscriptionId}\nResource Group: ${resourceGroup}\nStatus: ${job.status}\n\nError: ${job.error || 'Unknown error occurred'}\n\nPlease check the error details and try again.`
-          }]
-        };
-      }
-    } catch (err) {
-      console.error(`[Export Job ${jobId}] Execution error: ${err.message}`);
-      return {
-        isError: true,
-        content: [{
-          type: "text",
-          text: `❌ Export failed!\n\nJob ID: ${jobId}\nError: ${err.message}\n\nPlease check the logs and try again.`
-        }]
-      };
-    }
+    };
     
-    // Fallback return (should not reach here)
-    const host = process.env.PUBLIC_HOST || process.env.WEBSITE_HOSTNAME || 'localhost';
-    const port = process.env.PORT || 8080;
-    const protocol = process.env.PUBLIC_PROTOCOL || (host === 'localhost' ? 'http' : 'https');
-    const portSuffix = (host === 'localhost' || host.includes('azurewebsites.net')) ? `:${port}` : '';
-    const statusUrl = `${protocol}://${host}${portSuffix}/jobs/${jobId}`;
+    // Start the job asynchronously - DO NOT await
+    executeExportJob(job, progressCallback).catch(err => {
+      console.error(`[Export Job ${jobId}] Async execution error: ${err.message}`);
+      job.status = 'failed';
+      job.error = err.message;
+      job.completedAt = new Date().toISOString();
+    });
+    
+    // Return immediately with job ID (job runs in background)
+    let storageMsg = '';
+    if (blobStorageInfo.available) {
+      storageMsg = `\n\n📦 Storage: Terraform files will be exported to '${blobStorageInfo.accountName}/aztfexport/${subscriptionId}/${resourceGroup}/'`;
+    }
     
     return {
       content: [{
         type: "text",
-        text: `Export job status unknown.\n\nJob ID: ${jobId}\nStatus URL: ${statusUrl}\n\nPoll the status URL to check progress.`
+        text: `🚀 Export job started!\n\nJob ID: ${jobId}\nSubscription: ${subscriptionId}\nResource Group: ${resourceGroup}\nStatus: ${job.status}${storageMsg}\n\n⏳ The export is running in the background. This may take several minutes depending on the number of resources.\n\n💡 Check the terminal/logs for real-time progress updates.`
       }]
     };
   } catch (error) {

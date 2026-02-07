@@ -142,6 +142,32 @@ app.get("/health", (req, res) => {
     });
 });
 
+// Job status endpoint for polling
+app.get("/jobs/:jobId", (req, res) => {
+    const { jobId } = req.params;
+    const job = toolContext.jobs.get(jobId);
+    
+    if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+    }
+    
+    res.status(200).json({
+        jobId: job.id,
+        jobType: job.jobType || 'assessment',
+        status: job.status,
+        subscriptionId: job.subscriptionId,
+        resourceGroup: job.resourceGroup,
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        reportUrl: job.reportUrl,
+        reportFileName: job.reportFileName,
+        error: job.error,
+        stdout: job.stdout?.substring(0, 1000),  // Truncate for response size
+        stderr: job.stderr?.substring(0, 1000)
+    });
+});
+
 // Tools list endpoint for debugging
 app.get("/tools", (req, res) => {
     const psDir = path.resolve(__dirname, 'ps');

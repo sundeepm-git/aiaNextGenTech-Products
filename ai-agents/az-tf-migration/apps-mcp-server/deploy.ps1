@@ -208,6 +208,8 @@ if (-not $AcrName) {
     $AcrName = Get-UniqueAcrName
 }
 
+Write-Host "DEBUG: Using ACR: $AcrName"
+
 # ===========================
 # START DEPLOYMENT
 # ===========================
@@ -518,18 +520,22 @@ if ($ContainerName) {
 # Add SPN credentials if provided (REQUIRED for automation)
 if ($SubscriptionId) {
     $envVars += "AZURE_SUBSCRIPTION_ID=$SubscriptionId"
+    $envVars += "ARM_SUBSCRIPTION_ID=$SubscriptionId" # ADD THIS
 }
 
 if ($TenantId) {
     $envVars += "AZURE_TENANT_ID=$TenantId"
+    $envVars += "ARM_TENANT_ID=$TenantId"           # ADD THIS
 }
 
 if ($ClientId) {
     $envVars += "AZURE_CLIENT_ID=$ClientId"
+    $envVars += "ARM_CLIENT_ID=$ClientId"           # ADD THIS
 }
 
 if ($ClientSecret) {
     $envVars += "AZURE_CLIENT_SECRET=$ClientSecret"
+    $envVars += "ARM_CLIENT_SECRET=$ClientSecret"   # ADD THIS
 }
 
 Write-Info "Configured environment variables:"
