@@ -39,8 +39,8 @@ venv/
 .pytest_cache/
 
 # Azure TF Export/Refactored (do not check in)
-ai-agents/az-tf-migration/apps-mcp-server/azure-export/
-ai-agents/az-tf-migration/apps-mcp-server/azure-tf-refactored/
+ai-agents/az-tf-migration/apps-mcp-server/azure-export/*
+ai-agents/az-tf-migration/apps-mcp-server/azure-tf-refactored/*
 
 # Jupyter
 .ipynb_checkpoints/
