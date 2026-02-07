@@ -69,8 +69,6 @@ ai-agents/az-tf-migration/apps-mcp-server/.cache/
 # Azure export output directory (Terraform files)
 azure-export/
 **/azure-export/
-az-tf-migration
-
 
 # Sensitive configuration files
 claude-desktop-config.json
