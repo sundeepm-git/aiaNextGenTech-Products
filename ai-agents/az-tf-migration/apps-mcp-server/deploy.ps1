@@ -99,7 +99,7 @@ param (
     [switch]$KeepOldRevisions,
     
     [Parameter(Mandatory=$false)]
-    [int]$Port = 8080,
+    [int]$Port = 3000,
     
     [Parameter(Mandatory=$false)]
     [string]$Cpu = "1.0",
@@ -680,14 +680,25 @@ $APP_URL = az containerapp show `
 Write-Info "App URL: https://$APP_URL"
 Write-Host ""
 
-# Wait a bit more for app to fully start
-Write-Info "Waiting 15 seconds for application to initialize..."
-Start-Sleep -Seconds 15
+# Check current container status and logs
+Write-Info "Checking container status..."
+$revisionStatus = az containerapp revision show `
+    --name $ContainerAppName `
+    --resource-group $ResourceGroup `
+    --revision $latestReady `
+    --query "properties.provisioningState" `
+    --output tsv 2>$null
+
+Write-Info "Revision provisioning state: $revisionStatus"
+
+# Wait for app to fully start (increased from 15 to 45 seconds)
+Write-Info "Waiting 45 seconds for application to initialize..."
+Start-Sleep -Seconds 45
 
 # Test health endpoint
 Write-Info "Testing /health endpoint..."
 try {
-    $health = Invoke-RestMethod -Uri "https://$APP_URL/health" -TimeoutSec 20
+    $health = Invoke-RestMethod -Uri "https://$APP_URL/health" -TimeoutSec 60
     
     Write-Success "Health check passed"
     Write-Info "  Version: $($health.version)"
@@ -701,6 +712,13 @@ try {
     }
 } catch {
     Write-Fail "Health check failed: $_"
+    
+    Write-Info "Fetching recent container logs..."
+    az containerapp logs show `
+        --name $ContainerAppName `
+        --resource-group $ResourceGroup `
+        --tail 50 `
+        --output table 2>$null
 }
 
 Write-Host ""
@@ -712,7 +730,7 @@ $maxRetries = 5
 
 for ($i = 1; $i -le $maxRetries; $i++) {
     try {
-        $tools = Invoke-RestMethod -Uri "https://$APP_URL/tools" -TimeoutSec 20
+        $tools = Invoke-RestMethod -Uri "https://$APP_URL/tools" -TimeoutSec 60
         $toolCount = $tools.registered_tools.Count
         
         Write-Success "Found $toolCount registered tools:"
@@ -739,7 +757,16 @@ for ($i = 1; $i -le $maxRetries; $i++) {
 
 if (-not $toolsSuccess) {
     Write-Fail "Tools endpoint verification failed after $maxRetries attempts"
-    Write-Info "Check container logs for errors"
+    Write-Info "Fetching detailed container logs..."
+    Write-Host ""
+    Write-Host "===== CONTAINER LOGS (Last 100 lines) =====" -ForegroundColor Yellow
+    az containerapp logs show `
+        --name $ContainerAppName `
+        --resource-group $ResourceGroup `
+        --tail 100 `
+        --output table
+    Write-Host "============================================" -ForegroundColor Yellow
+    Write-Host ""
 }
 
 # ===========================
@@ -765,8 +792,15 @@ if ($toolsSuccess) {
     Write-Host "⚠ Deployment completed but verification had issues" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Debug commands:" -ForegroundColor Yellow
-    Write-Host "  az containerapp logs show --name $ContainerAppName --resource-group $ResourceGroup --follow" -ForegroundColor Gray
-
-        Write-Host "  az containerapp revision list --name $ContainerAppName --resource-group $ResourceGroup --output table" -ForegroundColor Gray
+    Write-Host "  # Follow live logs:" -ForegroundColor Gray
+    Write-Host "  az containerapp logs show --name $ContainerAppName --resource-group $ResourceGroup --follow" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  # List revisions:" -ForegroundColor Gray
+    Write-Host "  az containerapp revision list --name $ContainerAppName --resource-group $ResourceGroup --output table" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  # Restart container:" -ForegroundColor Gray
+    Write-Host "  az containerapp revision restart --name $ContainerAppName --resource-group $ResourceGroup --revision $latestReady" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  # Check container details:" -ForegroundColor Gray
+    Write-Host "  az containerapp show --name $ContainerAppName --resource-group $ResourceGroup" -ForegroundColor Cyan
 }
-

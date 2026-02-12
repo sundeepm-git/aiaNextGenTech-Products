@@ -73,6 +73,9 @@ azure-export/
 # Sensitive configuration files
 claude-desktop-config.json
 
+# Command files with secrets (MCP server)
+ai-agents/az-tf-migration/apps-mcp-server/command.md
+
 # Node modules
 node_modules/
 

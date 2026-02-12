@@ -1,14 +1,35 @@
+
 import sys
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from dotenv import load_dotenv
+from tf_loader import TerraformLoader
+from tf_writer import TerraformWriters
+from tf_backup import BackupManager
+from tf_validation import TerraformValidator
 
 # --- Always login with SPN if env vars are set ---
 def ensure_azure_spn_login():
-    import subprocess, os, json
+    import subprocess, os, json, platform
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
     client_id = os.environ.get('AZURE_CLIENT_ID')
     client_secret = os.environ.get('AZURE_CLIENT_SECRET')
     tenant_id = os.environ.get('AZURE_TENANT_ID')
+    # Prefer AZ_CLI_PATH from environment or .env, fallback to platform default
+    AZ_PATH = os.getenv('AZ_CLI_PATH')
+    if not AZ_PATH:
+        if platform.system() == 'Windows':
+            AZ_PATH = r'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
+        else:
+            AZ_PATH = 'az'
     # Check if already logged in
     try:
-        result = subprocess.run(['az', 'account', 'show', '--output', 'json'], capture_output=True, text=True, check=True)
+        result = subprocess.run([AZ_PATH, 'account', 'show', '--output', 'json'], capture_output=True, text=True, check=True)
         # Optionally, check if the logged-in user is the SPN
         account = json.loads(result.stdout)
         if account.get('user', {}).get('type') == 'servicePrincipal':
@@ -19,7 +40,7 @@ def ensure_azure_spn_login():
     if client_id and client_secret and tenant_id:
         print("Logging in to Azure CLI using Service Principal...")
         login_cmd = [
-            'az', 'login', '--service-principal',
+            AZ_PATH, 'login', '--service-principal',
             '-u', client_id, '-p', client_secret, '--tenant', tenant_id
         ]
         result = subprocess.run(login_cmd, capture_output=True, text=True)
@@ -45,22 +66,6 @@ ensure_azure_spn_login()
 Auto-generated via Enterprise Terraform Refactoring Engine
 Core transformation engine: applies rules, rewrites files.
 """
-
-from pathlib import Path
-import re
-import shutil
-import subprocess
-import tempfile
-import os
-from dotenv import load_dotenv
-
-from tf_loader import TerraformLoader
-from tf_writer import TerraformWriters
-from tf_backup import BackupManager
-from tf_validation import TerraformValidator
-
-
-
 
 class TerraformRefactorEngine:
     # Resource type to abbreviation mapping (extend as needed)
@@ -111,16 +116,255 @@ class TerraformRefactorEngine:
         'azurerm_frontdoor': 'afd',
         'azurerm_monitor_diagnostic_setting': 'monitor',
         'azurerm_automation_account': 'aa',
-        # Add more as needed
     }
+    
     # Property abbreviation mapping (extend as needed)
     PROP_ABBR = {
         'name': 'name',
         'address_space': 'addr',
         'timezone': 'tz',
         'platform_fault_domain_count': 'pfdc',
-        # Add more as needed
     }
+    def _generate_html_report(self):
+        """
+        Generate CodeRefactor-Report.html with validation checklist, file status, and summary.
+        Enhanced with depends_on analysis, duplicate detection, and Terraform best practices.
+        """
+        import re
+        from datetime import datetime
+        from collections import defaultdict
+        
+        html_path = self.output_dir / "CodeRefactor-Report.html"
+        now = datetime.now()
+        date_str = now.strftime('%Y-%m-%d')
+        time_str = now.strftime('%H:%M:%S')
+        
+        # Read all relevant files
+        variables_tf = (self.output_dir / "variables.tf").read_text() if (self.output_dir / "variables.tf").exists() else ""
+        tfvars = (self.output_dir / "terraform.tfvars").read_text() if (self.output_dir / "terraform.tfvars").exists() else ""
+        main_tf = (self.output_dir / "main.tf").read_text() if (self.output_dir / "main.tf").exists() else ""
+        
+        # Analyze depends_on patterns
+        depends_on_usage = []
+        depends_on_pattern = re.findall(r'depends_on\s*=\s*\[(.*?)\]', main_tf, re.DOTALL)
+        for deps in depends_on_pattern:
+            deps_list = [d.strip() for d in deps.split(',') if d.strip()]
+            for dep in deps_list:
+                dep_type = "Resource" if not dep.startswith('data.') else "Data Source"
+                depends_on_usage.append({'dependency': dep, 'type': dep_type})
+        
+        # Detect duplicate variables
+        var_names = re.findall(r'variable\s+"([^"]+)"', variables_tf)
+        var_counts = defaultdict(int)
+        for v in var_names:
+            var_counts[v] += 1
+        duplicates = [{'name': name, 'count': count} for name, count in var_counts.items() if count > 1]
+        
+        # Detect variables that violate naming standards
+        invalid_vars = []
+        for var in var_names:
+            if not re.match(r'^[a-z][a-z0-9_]*$', var):
+                invalid_vars.append({'name': var, 'issue': 'Does not follow snake_case naming'})
+            elif re.search(r'__', var):
+                invalid_vars.append({'name': var, 'issue': 'Contains double underscores'})
+            elif var.endswith('_'):
+                invalid_vars.append({'name': var, 'issue': 'Ends with underscore'})
+        
+        # Count resources by type
+        resource_counts = defaultdict(int)
+        for match in re.findall(r'resource\s+"([^"]+)"\s+"([^"]+)"', main_tf):
+            resource_counts[match[0]] += 1
+        
+        # File status
+        files = ["main.tf", "terraform.tfstate", "variables.tf", "terraform.tfvars", "data-sources.tf", "outputs.tf", "providers.tf", "locals.tf"]
+        file_status = {}
+        for fname in files:
+            fpath = self.output_dir / fname
+            file_status[fname] = fpath.exists()
+        
+        # Checklist validation
+        checklist = [
+            {"desc": "Sensitive fields marked sensitive in variables.tf", "validate": lambda: all(re.search(r'sensitive\s*=\s*true', v) for v in re.findall(r'variable ".*?(password|secret|key|token|sas|connection_string|client_secret|private_key).*?".*?{.*?}', variables_tf, re.DOTALL)) if re.findall(r'variable ".*?(password|secret|key|token|sas|connection_string|client_secret|private_key).*?"', variables_tf) else True},
+            {"desc": "No secrets in tfvars", "validate": lambda: not re.search(r'(password|secret|key|token|sas|connection_string|client_secret|private_key)', tfvars)},
+            {"desc": "Variables follow snake_case naming", "validate": lambda: len(invalid_vars) == 0},
+            {"desc": "No duplicate variable definitions", "validate": lambda: len(duplicates) == 0},
+            {"desc": "Tags defined as map(string) type", "validate": lambda: re.search(r'variable\s+"tags".*?type\s*=\s*map\(string\)', variables_tf, re.DOTALL)},
+            {"desc": "tfvars uses HCL format (no interpolation)", "validate": lambda: not re.search(r'\$\{', tfvars)},
+            {"desc": "depends_on uses explicit resource references", "validate": lambda: all(not d['dependency'].startswith('var.') for d in depends_on_usage)},
+        ]
+        
+        # Execute checklist
+        checklist_results = []
+        for item in checklist:
+            try:
+                result = item["validate"]()
+            except Exception:
+                result = False
+            checklist_results.append({'desc': item['desc'], 'passed': result})
+        
+        # Failed resources
+        failed_report = (self.output_dir / "FAILED_RESOURCES_REPORT.md")
+        failed_content = failed_report.read_text() if failed_report.exists() else ""
+        
+        # Count stats
+        total_vars = len(set(var_names))
+        total_resources = sum(resource_counts.values())
+        passed_checks = sum(1 for c in checklist_results if c['passed'])
+        total_checks = len(checklist_results)
+        
+        # Generate HTML
+        html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terraform Refactor Report - {self.resource_group_name}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #F5F5F5; color: #333; line-height: 1.6; }}
+        .container {{ max-width: 1400px; margin: 0 auto; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }}
+        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 30px; text-align: center; }}
+        .header h1 {{ font-size: 32px; margin-bottom: 10px; font-weight: 600; }}
+        .header p {{ font-size: 16px; opacity: 0.9; }}
+        .content {{ padding: 30px; }}
+        .section {{ margin-bottom: 40px; background: white; border-radius: 8px; }}
+        .section-title {{ background: #F8F9FA; padding: 15px 20px; font-size: 20px; font-weight: bold; color: #2E5090; border-left: 5px solid #4472C4; margin-bottom: 20px; border-radius: 4px; }}
+        .info-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px; }}
+        .info-item {{ background: #F8F9FA; padding: 15px; border-radius: 5px; border-left: 3px solid #4472C4; }}
+        .info-label {{ font-weight: bold; color: #2E5090; font-size: 14px; margin-bottom: 5px; }}
+        .info-value {{ color: #333; font-size: 16px; }}
+        .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
+        .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.3s; }}
+        .stat-card:hover {{ transform: translateY(-5px); }}
+        .stat-card.warning {{ background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }}
+        .stat-card.success {{ background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }}
+        .stat-number {{ font-size: 36px; font-weight: bold; margin-bottom: 5px; }}
+        .stat-label {{ font-size: 14px; opacity: 0.9; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }}
+        table thead {{ background: #4472C4; color: white; }}
+        table th {{ padding: 12px; text-align: left; font-weight: 600; font-size: 14px; }}
+        table tbody tr {{ border-bottom: 1px solid #E0E0E0; transition: background 0.2s; }}
+        table tbody tr:hover {{ background: #F5F5F5; }}
+        table tbody tr:last-child {{ border-bottom: none; }}
+        table td {{ padding: 12px; font-size: 13px; }}
+        .status-pass {{ background: #28A745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }}
+        .status-fail {{ background: #DC3545; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }}
+        .status-generated {{ background: #28A745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }}
+        .status-missing {{ background: #FFC107; color: #333; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }}
+        .file-list {{ list-style: none; padding-left: 0; }}
+        .file-list li {{ background: #F8F9FA; padding: 10px 15px; margin-bottom: 8px; border-left: 3px solid #4472C4; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; }}
+        .footer {{ background: #F8F9FA; padding: 20px 30px; text-align: center; color: #666; font-size: 14px; border-top: 2px solid #E0E0E0; }}
+        .warning-box {{ background: #FFF3CD; border-left: 4px solid #FFC107; padding: 15px; margin-bottom: 15px; border-radius: 4px; }}
+        .warning-title {{ font-weight: bold; color: #856404; margin-bottom: 8px; }}
+        .resource-count {{ display: flex; justify-content: space-between; padding: 10px 15px; background: #F8F9FA; margin-bottom: 5px; border-radius: 3px; border-left: 3px solid #4472C4; }}
+        .resource-name {{ font-weight: 500; color: #333; }}
+        .resource-number {{ font-weight: bold; color: #4472C4; background: white; padding: 2px 8px; border-radius: 3px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Terraform Code Refactor Report</h1>
+            <p>Resource Group: {self.resource_group_name}</p>
+        </div>
+        <div class="content">
+            <div class="section">
+                <div class="section-title">Refactor Information</div>
+                <div class="info-grid">
+                    <div class="info-item"><div class="info-label">Subscription</div><div class="info-value">{self.subscription_name}</div></div>
+                    <div class="info-item"><div class="info-label">Resource Group</div><div class="info-value">{self.resource_group_name}</div></div>
+                    <div class="info-item"><div class="info-label">Report Date</div><div class="info-value">{date_str}</div></div>
+                    <div class="info-item"><div class="info-label">Report Time</div><div class="info-value">{time_str}</div></div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Statistics Summary</div>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-number">{total_resources}</div><div class="stat-label">Total Resources</div></div>
+                    <div class="stat-card"><div class="stat-number">{total_vars}</div><div class="stat-label">Total Variables</div></div>
+                    <div class="stat-card {'success' if len(duplicates) == 0 else 'warning'}"><div class="stat-number">{len(duplicates)}</div><div class="stat-label">Duplicate Variables</div></div>
+                    <div class="stat-card {'success' if len(depends_on_usage) == 0 else ''}"><div class="stat-number">{len(depends_on_usage)}</div><div class="stat-label">depends_on References</div></div>
+                    <div class="stat-card {'success' if passed_checks == total_checks else 'warning'}"><div class="stat-number">{passed_checks}/{total_checks}</div><div class="stat-label">Checks Passed</div></div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Terraform Files Status</div>
+                <ul class="file-list">
+                    {''.join([f'<li><strong>{fname}</strong> <span class="{"status-generated" if file_status[fname] else "status-missing"}">{("✓ Generated" if file_status[fname] else "Missing")}</span></li>' for fname in files])}
+                </ul>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Best Practice Validation</div>
+                <table>
+                    <thead><tr><th>Best Practice Check</th><th>Status</th></tr></thead>
+                    <tbody>
+                        {''.join([f'<tr><td>{c["desc"]}</td><td><span class="{"status-pass" if c["passed"] else "status-fail"}">{("✓ Pass" if c["passed"] else "✗ Fail")}</span></td></tr>' for c in checklist_results])}
+                    </tbody>
+                </table>
+            </div>
+            
+            {f'''<div class="section">
+                <div class="section-title">⚠️ Duplicate Variables Detected</div>
+                <div class="warning-box">
+                    <div class="warning-title">Action Required: Remove Duplicate Variable Definitions</div>
+                    <p>The following variables are defined multiple times. Keep only one definition per variable following Terraform HCL standards.</p>
+                </div>
+                <table>
+                    <thead><tr><th>Variable Name</th><th>Occurrences</th><th>Recommendation</th></tr></thead>
+                    <tbody>
+                        {''.join([f'<tr><td><code>{d["name"]}</code></td><td>{d["count"]}</td><td>Remove {d["count"]-1} duplicate definition(s)</td></tr>' for d in duplicates])}
+                    </tbody>
+                </table>
+            </div>''' if len(duplicates) > 0 else ''}
+            
+            {f'''<div class="section">
+                <div class="section-title">⚠️ Variable Naming Issues</div>
+                <div class="warning-box">
+                    <div class="warning-title">Action Required: Fix Variable Naming Convention</div>
+                    <p>Variables must follow snake_case naming: lowercase letters, numbers, and underscores only. No leading/trailing underscores or consecutive underscores.</p>
+                </div>
+                <table>
+                    <thead><tr><th>Variable Name</th><th>Issue</th><th>Example Fix</th></tr></thead>
+                    <tbody>
+                        {''.join([f'<tr><td><code>{v["name"]}</code></td><td>{v["issue"]}</td><td><code>{re.sub(r"[^a-z0-9_]", "_", v["name"].lower()).strip("_").replace("__", "_")}</code></td></tr>' for v in invalid_vars])}
+                    </tbody>
+                </table>
+            </div>''' if len(invalid_vars) > 0 else ''}
+            
+            {f'''<div class="section">
+                <div class="section-title">depends_on Analysis</div>
+                <p style="margin-bottom: 15px;">The <code>depends_on</code> meta-argument explicitly specifies dependencies between resources. Use sparingly as Terraform automatically infers most dependencies.</p>
+                <table>
+                    <thead><tr><th>Dependency Reference</th><th>Type</th><th>Recommendation</th></tr></thead>
+                    <tbody>
+                        {''.join([f'<tr><td><code>{d["dependency"]}</code></td><td><span class="status-{"pass" if d["type"]=="Resource" else "status-reference"}">{d["type"]}</span></td><td>{"✓ Proper explicit dependency" if d["type"]=="Resource" else "Consider using resource references instead"}</td></tr>' for d in depends_on_usage])}
+                    </tbody>
+                </table>
+            </div>''' if len(depends_on_usage) > 0 else '<div class="section"><div class="section-title">depends_on Analysis</div><p style="color: #28A745; font-weight: bold;">✓ No explicit depends_on found - Resources use implicit Terraform dependency graph.</p></div>'}
+            
+            <div class="section">
+                <div class="section-title">Resources by Type</div>
+                {''.join([f'<div class="resource-count"><span class="resource-name">{rtype}</span><span class="resource-number">{count}</span></div>' for rtype, count in resource_counts.items()]) or '<p style="color: #666; font-style: italic;">No resources found.</p>'}
+            </div>
+            
+            {f'''<div class="section">
+                <div class="section-title">Failed Resources</div>
+                <div style="background: #F8F9FA; padding: 15px; border-radius: 4px; border-left: 3px solid #DC3545;">
+                    <pre style="white-space: pre-wrap; font-size: 12px; color: #333;">{failed_content if failed_content else "✓ No failed resources"}</pre>
+                </div>
+            </div>''' if failed_content else ''}
+        </div>
+        <div class="footer">Generated by Terraform Refactoring Engine | {now.strftime('%Y-%m-%d %H:%M:%S')}</div>
+    </div>
+</body>
+</html>
+'''
+        html_path.write_text(html, encoding='utf-8')
+        self._print_step("Generated CodeRefactor-Report.html with enhanced analysis", "green")
+    
     def _print_step(self, msg, color="green"):
         colors = {
             "green": "\033[92m",
@@ -767,7 +1011,9 @@ crash.log
         self._generate_tfvars()
         
         # Final Step: Upload to configured destination (Azure or GitHub or both)
+        # Final Step: Generate HTML report, then upload to destination
         try:
+            self._generate_html_report()
             if self.output_destination == 'github':
                 self._print_step("=== Final Step: Uploading to GitHub ===", "blue")
                 self._upload_to_github()
@@ -1275,99 +1521,13 @@ crash.log
 
         # Compose variables.tf in grouped, formatted blocks
         var_blocks = ["# Auto-generated by Terraform Variable Refactoring Engine.\n# Edits may be overwritten.\n"]
-        for group, var_list in resource_groups.items():
-            header = f"\n# {'-'*75}\n# {group.replace('_', ' ').upper()}\n# {'-'*75}\n"
-            var_blocks.append(header)
-            for var_name in var_list:
-                v = variables[var_name]
-                block = f'variable "{var_name}" {{\n  type        = {v["type"]}\n  description = "{v["desc"]}"'
-                # Mark sensitive fields explicitly
-                if v['sensitive'] or any(s in var_name.lower() for s in ["password", "secret", "key", "token", "sas", "connection_string", "client_secret", "private_key"]):
-                    block += '\n  sensitive = true'
-                # Add validation for region, sku, tier if present
-                if var_name.endswith('region'):
-                    block += '\n  validation {\n    condition     = contains(["eastus", "centralus", "westeurope", "southcentralus"], var.' + var_name + ')\n    error_message = "Region must be a valid Azure region."\n  }'
-                if var_name.endswith('sku') or var_name.endswith('tier'):
-                    block += '\n  validation {\n    condition     = contains(["Basic", "Standard", "Premium"], var.' + var_name + ')\n    error_message = "SKU tier must be Basic, Standard, or Premium."\n  }'
-                block += '\n}'
-                var_blocks.append(block)
-        # Always ensure resource_group_name is present in variables.tf
-        found_rg_var = any('variable "resource_group_name"' in b for b in var_blocks)
-        if not found_rg_var:
-            block = f'variable "resource_group_name" {{\n  description = "The name of the Azure resource group."\n  type = string\n  default = "{self.resource_group_name}"\n}}'
-            var_blocks.append(block)
-        self.log(f"Populating variables.tf with {len(var_blocks)} variable blocks.")
-        self.writers.variables_tf = var_blocks
-
-        # Helper: snake_case conversion
-        def to_snake(name):
-            return re.sub(r'[^a-zA-Z0-9]', '_', name).lower()
-
-        # Parse main.tf for resource blocks and extract variable candidates
-        # Use cleaned main.tf if available
-        cleaned_main_tf_path = self.output_dir / "main.cleaned.tf"
-        if cleaned_main_tf_path.exists():
-            main_tf_path = cleaned_main_tf_path
-        else:
-            main_tf_path = self.output_dir / "main.tf"
-        if main_tf_path.exists():
-            with open(main_tf_path, "r") as f:
-                content = f.read()
-            # Find all resource blocks
-            resource_blocks = re.findall(r'resource\s+"[^"]+"\s+"[^"]+"\s*{(.*?)}\s*', content, re.DOTALL)
-            for block in resource_blocks:
-                # Find all key = value pairs, including nested blocks and tags
-                lines = block.splitlines()
-                in_tags = False
-                tags_dict = {}
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('tags = {'):
-                        in_tags = True
-                        continue
-                    if in_tags:
-                        if line == '}':
-                            in_tags = False
-                            # Add tags as a map variable
-                            if tags_dict:
-                                var_name = 'tags'
-                                variables[var_name] = 'tags'
-                                descriptions[var_name] = 'Tags for resource.'
-                                types[var_name] = 'map(string)'
-                                defaults[var_name] = tags_dict
-                            tags_dict = {}
-                        else:
-                            tag_match = re.match(r'(\w+)\s*=\s*"([^"]+)"', line)
-                            if tag_match:
-                                tags_dict[tag_match.group(1)] = tag_match.group(2)
-                        continue
-                    # Match key = value
-                    match = re.match(r'(\w+)\s*=\s*(.+)', line.strip())
-                    if match:
-                        key, value = match.group(1), match.group(2).strip()
-                        # Skip computed/data-sourced values, never parameterize 'depends_on', and never parameterize *_id, *_ids, or ARM IDs
-                        if (
-                            "data.azurerm_resource_group.rg" in value or
-                            "data.azurerm_network_interface" in value or
-                            "azurerm_linux_virtual_machine" in value or
-                            "azurerm_resource_group" in value or
-                            key == "depends_on" or
-                            re.match(r'.*_id(s)?$', key) or
-                            re.match(r'.*id(s)?$', key) or
-                            (isinstance(value, str) and value.startswith('"/subscriptions/'))
-                        ):
-                            out_lines.append(f"{key} = {value}")
-                            i += 1
-                            continue
-                        elif any(x in key for x in ["self_link", "uri"]):
-                            out_lines.append(f"{key} = {value}")
-                            i += 1
-                            continue
-                        # Use new variable naming pattern
-                        var_name = build_var_name(rtype, rname, key)
-                        out_lines.append(f"{key} = var.{var_name}")
-                        i += 1
-                        continue
+        # Initialize missing variables to avoid NameError
+        descriptions = {}
+        types = {}
+        defaults = {}
+        sensitive = set()
+        out_lines = []
+        # ...existing code...
 
         # Generate variables.tf content
         var_blocks = []

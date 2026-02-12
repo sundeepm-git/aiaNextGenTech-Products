@@ -1,6 +1,4 @@
 # Requirements for Azure-to-Terraform Refactor Engine
-# Standard library (built-in, no install needed):
-# pathlib, re, shutil, datetime, subprocess, sys, os, tempfile, time, argparse
 
 # External dependencies
 PyYAML>=6.0

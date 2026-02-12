@@ -74,11 +74,53 @@ param (
 # Stop on errors
 $ErrorActionPreference = "Stop"
 
+# === PARAMETER VALIDATION AND DEBUG LOGGING ===
+Write-Host ""
+Write-Host ('=' * 80) -ForegroundColor Cyan
+Write-Host "  PARAMETER VALIDATION" -ForegroundColor White
+Write-Host ('=' * 80) -ForegroundColor Cyan
+Write-Host "  SubscriptionId: $SubscriptionId" -ForegroundColor Gray
+Write-Host "  ResourceGroupName: $ResourceGroupName" -ForegroundColor Gray
+Write-Host "  StorageContainer: $StorageContainer" -ForegroundColor Gray
+Write-Host ('=' * 80) -ForegroundColor Cyan
+
+# Validate ResourceGroupName doesn't contain invalid characters or suspicious values
+if ($ResourceGroupName -match '[\\/:*?"<>|]') {
+    Write-Host ""
+    Write-Host "ERROR: ResourceGroupName contains invalid characters: $ResourceGroupName" -ForegroundColor Red
+    Write-Host "Valid characters: letters, numbers, hyphens, underscores, periods, and parentheses" -ForegroundColor Yellow
+    exit 1
+}
+
+# Warn if ResourceGroupName looks suspicious
+$suspiciousNames = @('container', 'test', 'temp', 'tmp', 'sandbox', 'sb_')
+if ($suspiciousNames -contains $ResourceGroupName.ToLower()) {
+    Write-Host ""
+    Write-Host "WARNING: ResourceGroupName '$ResourceGroupName' looks suspicious!" -ForegroundColor Yellow
+    Write-Host "Are you sure this is the correct Azure Resource Group name?" -ForegroundColor Yellow
+    Write-Host "Common mistake: passing execution mode or test value instead of actual RG name" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# === CONTAINER COMPATIBILITY SETUP ===
+# Set environment variables for headless execution in Linux containers
+$env:NO_COLOR = "1"
+$env:TERM = "dumb"
+$env:AZURE_EXTENSION_QUIET = "true"
+$env:AZURE_CORE_NO_COLOR = "true"
+$env:AZURE_CORE_OUTPUT = "json"
+
+# Detect if running in container
+$isContainer = $env:RUNNING_IN_CONTAINER -eq "true" -or (Test-Path "/.dockerenv")
+if ($isContainer) {
+    Write-Host "Running in container mode" -ForegroundColor Cyan
+}
+
 # Try to load .env file from script directory or parent directory
 $envLocations = @(
-    "$PSScriptRoot\.env",
-    "$PSScriptRoot\..\.env",
-    ".\.env"
+    (Join-Path $PSScriptRoot ".env"),
+    (Join-Path (Split-Path $PSScriptRoot -Parent) ".env"),
+    ".env"
 )
 
 foreach ($envFile in $envLocations) {
@@ -355,10 +397,23 @@ if ([string]::IsNullOrWhiteSpace($scriptDir)) {
 # Variables
 # Use standardized project structure for exports: apps-mcp-server/azure-export/<subscription>/<rg>
 # This ensures idempotency and allows the script to detect/clean existing exports
-$repoRoot = (Resolve-Path "$scriptDir\..\").Path
+$repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $exportRoot = Join-Path $repoRoot "azure-export"
 $subscriptionDir = Join-Path $exportRoot -ChildPath $subscriptionName
 $exportDir = Join-Path $subscriptionDir -ChildPath $ResourceGroupName
+
+# Debug logging for directory paths
+Write-Host ""
+Write-Host ('=' * 80) -ForegroundColor Cyan
+Write-Host "  DIRECTORY STRUCTURE" -ForegroundColor White
+Write-Host ('=' * 80) -ForegroundColor Cyan
+Write-Host "  Script Directory: $scriptDir" -ForegroundColor Gray
+Write-Host "  Repo Root: $repoRoot" -ForegroundColor Gray
+Write-Host "  Export Root: $exportRoot" -ForegroundColor Gray  
+Write-Host "  Subscription Directory: $subscriptionDir" -ForegroundColor Gray
+Write-Host "  Target Export Directory: $exportDir" -ForegroundColor Green
+Write-Host ('=' * 80) -ForegroundColor Cyan
+Write-Host ""
 
 # Check if export directory already exists (from previous run)
 if (Test-Path $exportDir) {
@@ -685,153 +740,669 @@ if ($resources) {
     Write-Host ""
     Write-Host "Running aztfexport..." -ForegroundColor Cyan
     try {
-        # Check if aztfexport is available
-        $aztfexportPath = Get-Command aztfexport -ErrorAction SilentlyContinue
-        if (-not $aztfexportPath) {
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host "  ERROR: aztfexport Not Found" -ForegroundColor Red
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  aztfexport is required but not found in PATH." -ForegroundColor White
-            Write-Host ""
-            Write-Host "  To install aztfexport:" -ForegroundColor Yellow
-            Write-Host "    Windows: winget install aztfexport" -ForegroundColor Gray
-            Write-Host "    macOS: brew install aztfexport" -ForegroundColor Gray
-            Write-Host "    Linux: Download from https://github.com/Azure/aztfexport/releases" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  Or visit: https://github.com/Azure/aztfexport" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            exit 1
-        }
+    # 1. Environment Guardrails
+    $env:NO_COLOR = "1"
+    $env:TERM = "xterm"
+    $env:AZURE_EXTENSION_QUIET = "true"
+    $global:globalSuccess = $true 
 
-        Write-Host "aztfexport found: $($aztfexportPath.Source)" -ForegroundColor Green
-
-        # Verify export directory is truly empty before running aztfexport
-        $dirContents = Get-ChildItem -Path $exportDir -Force -ErrorAction SilentlyContinue
-        if ($dirContents) {
-            Write-Host "WARNING: Export directory is not empty! Contents:" -ForegroundColor Yellow
-            $dirContents | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-            Write-Host "Cleaning directory again..." -ForegroundColor Yellow
-            Remove-Item -Path "$exportDir\*" -Recurse -Force
-        }
-        Write-Host "Export directory verified empty: $exportDir" -ForegroundColor Green
-
-        # Export resources individually for speed, then consolidate files
-        Write-Host "Exporting $($exportableResources.Count) resources individually..." -ForegroundColor Cyan
-        $exportCount = 0
-        
-        foreach ($resource in $exportableResources) {
-            $exportCount++
-            $resourceName = $resource.name
-            $resourceId = $resource.id
-            
-            Write-Host "[$exportCount/$($exportableResources.Count)] Exporting: $resourceName" -ForegroundColor Yellow
-            
-            # Export each resource (creates/appends to files)
-            if ($exportCount -eq 1) {
-                # First resource: create base directory and files
-                aztfexport resource `
-                    --subscription-id $SubscriptionId `
-                    --output-dir $exportDir `
-                    --non-interactive `
-                    $resourceId 2>&1 | Out-Null
-            } else {
-                # Subsequent resources: append to existing files
-                aztfexport resource `
-                    --subscription-id $SubscriptionId `
-                    --output-dir $exportDir `
-                    --non-interactive `
-                    --append `
-                    $resourceId 2>&1 | Out-Null
-            }
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  ✓ Success" -ForegroundColor Green
-            } else {
-                    Write-Host "  ✗ Failed" -ForegroundColor Red
-                    Write-Host "    Error: $($Error[0])" -ForegroundColor Yellow
-            }
-        }
-        
-        # Consolidate .aztfexport files into main.tf
-        Write-Host ""
-        Write-Host "Consolidating Terraform files..." -ForegroundColor Cyan
-        
-        $mainTfPath = Join-Path $exportDir "main.tf"
-        $mainContent = ""
-        
-        # Read main.tf if it exists
-        if (Test-Path $mainTfPath) {
-            $mainContent = Get-Content $mainTfPath -Raw
-        }
-        
-        # Find and merge all .aztfexport files
-        $aztfexportFiles = Get-ChildItem -Path $exportDir -Filter "*.aztfexport.tf" -ErrorAction SilentlyContinue
-        foreach ($file in $aztfexportFiles) {
-            $content = Get-Content $file.FullName -Raw
-            $mainContent += "`n`n" + $content
-            Remove-Item $file.FullName -Force
-            Write-Host "  Merged: $($file.Name)" -ForegroundColor Gray
-        }
-        
-        # Write consolidated main.tf
-        if ($mainContent) {
-            Set-Content -Path $mainTfPath -Value $mainContent.Trim() -Force
-            Write-Host "  ✓ Consolidated all resources into main.tf" -ForegroundColor Green
-        }
-        
-        $LASTEXITCODE = 0
-
-        # Check if command succeeded
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host "  EXPORT FAILED - aztfexport Error" -ForegroundColor Red
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  Export Details:" -ForegroundColor White
-            Write-Host "    Resource Group: $ResourceGroupName" -ForegroundColor White
-            Write-Host "    Subscription: $subscriptionName" -ForegroundColor White
-            Write-Host "    Exit Code: $LASTEXITCODE" -ForegroundColor White
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            exit 1
-        }
-        
-        Write-Host ""
-        Write-Host "Export completed successfully!" -ForegroundColor Green
-        Write-Host ""
+    # 2. Setup Master Directory
+    $absoluteExportDir = [System.IO.Path]::GetFullPath($exportDir)
+    if (Test-Path $absoluteExportDir) {
+        Get-ChildItem -Path $absoluteExportDir -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
     }
-    catch {
-        Write-Host ""
-        Write-Host "ERROR: aztfexport execution failed" -ForegroundColor Red
-        Write-Host "$($_.Exception.Message)" -ForegroundColor Yellow
-        exit 1
+    New-Item -ItemType Directory -Path $absoluteExportDir -Force | Out-Null
+    
+    # Initialize Master Files
+    $masterMainTf = Join-Path $absoluteExportDir "main.tf"
+    $masterProviderTf = Join-Path $absoluteExportDir "provider.tf"
+    "# Generated Terraform Configuration`n" | Out-File -FilePath $masterMainTf -Encoding UTF8 -Force
+
+    # Helper function to remove terraform/provider/import blocks with proper brace counting
+    function Remove-TerraformBlocks {
+        param([string]$text)
+        
+        $lines = $text -split "`r?`n"
+        $result = @()
+        $inBlock = $false
+        $blockType = ''
+        $braceCount = 0
+        
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            
+            # Check if starting a block to remove (terraform, provider, import)
+            if ($line -match '^\s*(terraform|import)\s*\{' -or $line -match '^\s*provider\s+"[^"]+"\s*\{') {
+                $inBlock = $true
+                $blockType = $matches[1]
+                $braceCount = 1
+                continue
+            }
+            
+            if ($inBlock) {
+                # Count braces
+                $openBraces = ($line.ToCharArray() | Where-Object { $_ -eq '{' }).Count
+                $closeBraces = ($line.ToCharArray() | Where-Object { $_ -eq '}' }).Count
+                $braceCount += $openBraces - $closeBraces
+                
+                # End of block when braces balance
+                if ($braceCount -le 0) {
+                    $inBlock = $false
+                    $blockType = ''
+                    $braceCount = 0
+                }
+                continue
+            }
+            
+            # Keep non-block lines
+            $result += $line
+        }
+        
+        return ($result -join "`n")
+    }
+
+    # Initialize tracking for HTML report
+    $exportedResourcesList = @()
+    $exportSuccessCount = 0
+    $exportFailureCount = 0
+
+    # 3. RESOURCE LOOP (Sandboxed Mode)
+    Write-Host "Starting Export Job (Sandbox Mode)..." -ForegroundColor Cyan
+    $exportCount = 0
+
+    foreach ($resource in $exportableResources) {
+        $exportCount++
+        Write-Host "[$exportCount/$($exportableResources.Count)] Processing: $($resource.name)" -ForegroundColor Yellow
+
+        # Create a unique sandbox for this specific resource
+        $sandboxPath = Join-Path $absoluteExportDir "sb_$($exportCount)"
+        New-Item -ItemType Directory -Path $sandboxPath -Force | Out-Null
+
+        # Generate meaningful Terraform resource name from Azure resource name
+        $terraformResourceName = $resource.name -replace '[^a-zA-Z0-9_]', '_'
+
+        $argList = @(
+            "resource",
+            "--subscription-id", $SubscriptionId,
+            "--output-dir", $sandboxPath,  # Export to sandbox
+            "--non-interactive",
+            "--log-level", "Panic",
+            "--name", $terraformResourceName  # Use meaningful name instead of res-0
+        )
+        $argList += $resource.id
+
+        # Create environment hashtable for child process
+        $exportEnv = @{
+            'NO_COLOR' = '1'
+            'TERM' = 'dumb'
+            'AZURE_EXTENSION_QUIET' = 'true'
+            'AZURE_CORE_NO_COLOR' = 'true'
+            'PATH' = $env:PATH
+        }
+        
+        # Preserve Azure authentication
+        if ($env:AZURE_CLIENT_ID) { $exportEnv['AZURE_CLIENT_ID'] = $env:AZURE_CLIENT_ID }
+        if ($env:AZURE_CLIENT_SECRET) { $exportEnv['AZURE_CLIENT_SECRET'] = $env:AZURE_CLIENT_SECRET }
+        if ($env:AZURE_TENANT_ID) { $exportEnv['AZURE_TENANT_ID'] = $env:AZURE_TENANT_ID }
+        if ($env:AZURE_SUBSCRIPTION_ID) { $exportEnv['AZURE_SUBSCRIPTION_ID'] = $env:AZURE_SUBSCRIPTION_ID }
+        
+        # Detect container environment
+        $isContainer = ($env:RUNNING_IN_CONTAINER -eq 'true') -or ($env:EXECUTION_MODE -eq 'CONTAINER')
+        
+        # Run aztfexport with explicit environment
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        
+        if ($isContainer) {
+            # Container: Write command to temp script file, then execute via BASH directly
+            # We REMOVED the 'script' command wrapper as it swallows arguments in Alpine/Linux containers
+            
+            $tempScript = Join-Path $sandboxPath "run-aztfexport.sh"
+            
+            # Build clean bash script
+            # Note: We build the command string manually to ensure arguments are passed correctly
+            $cmdParts = @("aztfexport")
+            foreach ($arg in $argList) {
+                # Wrap every argument in single quotes to prevent shell expansion issues
+                $cmdParts += "'$arg'"
+            }
+            $fullCmd = $cmdParts -join " "
+
+            # Create the bash script content
+            $scriptContent = "#!/bin/bash`ncd `"$sandboxPath`"`n$fullCmd"
+            Set-Content -Path $tempScript -Value $scriptContent -Encoding UTF8 -NoNewline
+            
+            # Make executable
+            & chmod +x $tempScript
+
+            # Execute directly with bash (No 'timeout' command needed here, standard Process wait handles it)
+            $psi.FileName = '/bin/bash'
+            $psi.Arguments = "'$tempScript'"
+        }
+        
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardInput = $true  # Redirect stdin and close it immediately
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        
+        # Set environment variables
+        foreach ($key in $exportEnv.Keys) {
+            $psi.EnvironmentVariables[$key] = $exportEnv[$key]
+        }
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+        
+        # Use event handlers to consume output asynchronously (prevents buffer deadlock)
+        $outputBuilder = New-Object System.Text.StringBuilder
+        $errorBuilder = New-Object System.Text.StringBuilder
+        
+        $outputHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data) | Out-Null
+            }
+        }
+        
+        $errorHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data) | Out-Null
+            }
+        }
+        
+        $outputEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outputHandler -MessageData $outputBuilder
+        $errorEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errorHandler -MessageData $errorBuilder
+        
+        $process.Start() | Out-Null
+        
+        # Close stdin immediately to signal no input is available
+        $process.StandardInput.Close()
+        
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        
+        # Wait with timeout (5 minutes per resource)
+        $timeoutMs = 300000  # 5 minutes
+        if (-not $process.WaitForExit($timeoutMs)) {
+            Write-Host "   ! Warning: Export timeout for $($resource.name) - killing process" -ForegroundColor Yellow
+            $process.Kill()
+            $timedOut = $true
+        } else {
+            $timedOut = $false
+        }
+        
+        # Cleanup event handlers
+        Unregister-Event -SourceIdentifier $outputEvent.Name -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $errorEvent.Name -ErrorAction SilentlyContinue
+        Remove-Job -Id $outputEvent.Id -Force -ErrorAction SilentlyContinue
+        Remove-Job -Id $errorEvent.Id -Force -ErrorAction SilentlyContinue
+        
+        # Debug: Always show output in container mode to diagnose issues
+        if ($env:RUNNING_IN_CONTAINER -eq 'true') {
+            Write-Host "   DEBUG: Exit code: $($process.ExitCode)" -ForegroundColor Magenta
+            $stdoutText = $outputBuilder.ToString()
+            $stderrText = $errorBuilder.ToString()
+            
+            if ($stdoutText) {
+                Write-Host "   DEBUG: aztfexport stdout:" -ForegroundColor Magenta
+                $stdoutPreview = $stdoutText.Substring(0, [Math]::Min(1000, $stdoutText.Length))
+                Write-Host "   $($stdoutPreview.Replace("`n", "`n   "))" -ForegroundColor Gray
+            }
+            
+            if ($stderrText) {
+                Write-Host "   DEBUG: aztfexport stderr:" -ForegroundColor Magenta
+                $stderrPreview = $stderrText.Substring(0, [Math]::Min(1000, $stderrText.Length))
+                Write-Host "   $($stderrPreview.Replace("`n", "`n   "))" -ForegroundColor Gray
+            }
+        }
+        
+        if ($timedOut) {
+            Write-Host "   ! Export timed out after 5 minutes" -ForegroundColor Red
+        } elseif ($process.ExitCode -ne 0) {
+            Write-Host "   ! Warning: aztfexport exited with code $($process.ExitCode) for $($resource.name)" -ForegroundColor Yellow
+            $errorOutput = $errorBuilder.ToString()
+            if ($errorOutput) {
+                Write-Host "   Error: $($errorOutput.Substring(0, [Math]::Min(200, $errorOutput.Length)))" -ForegroundColor Gray
+            }
+            
+            # Debug: Show full output in container
+            if ($env:RUNNING_IN_CONTAINER -eq 'true') {
+                $stdoutText = $outputBuilder.ToString()
+                if ($stdoutText) {
+                    Write-Host "   DEBUG: aztfexport stdout (first 500 chars):" -ForegroundColor Magenta
+                    Write-Host "   $($stdoutText.Substring(0, [Math]::Min(500, $stdoutText.Length)).Replace("`n", "`n   "))" -ForegroundColor Gray
+                }
+            }
+        }
+        
+        Start-Sleep -Seconds 2 # Allow disk commit
+
+        # 4. CONSOLIDATE FROM SANDBOX
+        $genFiles = Get-ChildItem -Path $sandboxPath -Filter "*.tf" -ErrorAction SilentlyContinue
+        
+        # Debug: Show what files were generated
+        if ($env:RUNNING_IN_CONTAINER -eq 'true') {
+            Write-Host "   DEBUG: Sandbox path: $sandboxPath" -ForegroundColor Magenta
+            Write-Host "   DEBUG: Checking for *.tf files..." -ForegroundColor Magenta
+            
+            # Show all files in sandbox (not just .tf)
+            $allFiles = Get-ChildItem -Path $sandboxPath -ErrorAction SilentlyContinue
+            if ($allFiles) {
+                Write-Host "   DEBUG: All files in sandbox:" -ForegroundColor Magenta
+                foreach ($f in $allFiles) {
+                    Write-Host "   DEBUG:   - $($f.Name) ($($f.Length) bytes)" -ForegroundColor Gray
+                }
+            } else {
+                Write-Host "   DEBUG: No files found in sandbox directory!" -ForegroundColor Red
+            }
+            
+            Write-Host "   DEBUG: .tf files count: $($genFiles.Count)" -ForegroundColor Magenta
+        }
+        
+        if ($genFiles -and $genFiles.Count -gt 0) {
+            foreach ($file in $genFiles) {
+                try {
+                    $content = Get-Content $file.FullName -Raw -ErrorAction Stop
+                    
+                    if ([string]::IsNullOrWhiteSpace($content)) {
+                        Write-Host "   ! Warning: Empty file $($file.Name)" -ForegroundColor Yellow
+                        continue
+                    }
+                    
+                    # Extract and save provider block (first occurrence only)
+                    if (-not (Test-Path $masterProviderTf)) {
+                        if ($content -match '(?s)provider\s+"azurerm"\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}') {
+                            $providerBlock = $matches[0]
+                            $providerBlock | Out-File -FilePath $masterProviderTf -Encoding UTF8 -Force
+                            Write-Host "   ✓ Extracted provider block" -ForegroundColor Green
+                        }
+                    }
+
+                    # Remove terraform, provider, import blocks - preserve only resource and data blocks
+                    $clean = $content
+                    
+                    # Debug: Show what we're working with (first 500 chars)
+                    if ($env:RUNNING_IN_CONTAINER -eq 'true') {
+                        $preview = $content.Substring(0, [Math]::Min(500, $content.Length))
+                        Write-Host "   DEBUG: File content preview (before cleanup):" -ForegroundColor Magenta
+                        Write-Host "   $($preview.Replace("`n", "`n   "))" -ForegroundColor Gray
+                    }
+                    
+                    # Remove blocks using brace counting (function defined at script level)
+                    $clean = Remove-TerraformBlocks -text $clean
+                    
+                    # Debug: Show what's left after cleanup
+                    if ($env:RUNNING_IN_CONTAINER -eq 'true') {
+                        Write-Host "   DEBUG: Content after cleanup (length: $($clean.Length)):" -ForegroundColor Magenta
+                        if ($clean.Length -gt 0) {
+                            $cleanPreview = $clean.Substring(0, [Math]::Min(500, $clean.Length))
+                            Write-Host "   $($cleanPreview.Replace("`n", "`n   "))" -ForegroundColor Gray
+                        } else {
+                            Write-Host "   (empty)" -ForegroundColor Red
+                        }
+                    }
+                    
+                    # Remove any orphaned terraform config lines
+                    $clean = $clean -replace '(?m)^\s*subscription_id\s*=.*$', ''
+                    $clean = $clean -replace '(?m)^\s*resource_group_name\s*=.*$', ''
+                    # Clean up excessive whitespace
+                    $clean = $clean -replace '(`r?`n){3,}', "`n`n"
+
+                    if ($clean.Trim()) {
+                        "`n# --- Resource: $($resource.name) ---`n$($clean.Trim())" | Out-File -FilePath $masterMainTf -Append -Encoding UTF8
+                        Write-Host "   ✓ Merged" -ForegroundColor Green
+                        
+                        # Track successful export
+                        $exportSuccessCount++
+                        $exportedResourcesList += [PSCustomObject]@{
+                            Name = $resource.name
+                            Type = $resource.type
+                            Status = 'Success'
+                        }
+                    } else {
+                        Write-Host "   ! Warning: No resource content after cleanup for $($resource.name)" -ForegroundColor Yellow
+                        $exportFailureCount++
+                        $exportedResourcesList += [PSCustomObject]@{
+                            Name = $resource.name
+                            Type = $resource.type
+                            Status = 'Failed - No content'
+                        }
+                    }
+                } catch {
+                    Write-Host "   ! Error processing $($file.Name): $($_.Exception.Message)" -ForegroundColor Red
+                }
+            }
+            
+            # Merge state file if it exists (don't overwrite, merge resources)
+            $stateFile = Join-Path $sandboxPath "terraform.tfstate"
+            if (Test-Path $stateFile) {
+                try {
+                    $stateDestination = Join-Path $absoluteExportDir "terraform.tfstate"
+                    
+                    if (Test-Path $stateDestination) {
+                        # Merge with existing state file
+                        $existingState = Get-Content $stateDestination -Raw | ConvertFrom-Json
+                        $newState = Get-Content $stateFile -Raw | ConvertFrom-Json
+                        
+                        # Merge resources arrays
+                        if ($newState.resources) {
+                            if (-not $existingState.resources) {
+                                $existingState.resources = @()
+                            }
+                            $existingState.resources += $newState.resources
+                        }
+                        
+                        # Write merged state
+                        $existingState | ConvertTo-Json -Depth 100 | Set-Content $stateDestination -Encoding UTF8
+                        Write-Host "   ✓ Merged state file" -ForegroundColor Green
+                    } else {
+                        # First state file, just copy
+                        Copy-Item $stateFile $stateDestination -Force -ErrorAction Stop
+                        Write-Host "   ✓ Created state file" -ForegroundColor Green
+                    }
+                } catch {
+                    Write-Host "   ! Warning: Failed to merge state file: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host "   ! Warning: No .tf files generated for $($resource.name)" -ForegroundColor Red
+            Write-Host "   Check if resource exists and is exportable" -ForegroundColor Yellow
+            $exportFailureCount++
+            $exportedResourcesList += [PSCustomObject]@{
+                Name = $resource.name
+                Type = $resource.type
+                Status = 'Failed - No files generated'
+            }
+        }
+
+        # Cleanup Sandbox immediately
+        Remove-Item $sandboxPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # === POST-PROCESSING: Standards Enforcement ===
+    Write-Host "`nEnforcing Terraform standards..." -ForegroundColor Cyan
+    
+    $mainTfPath = Join-Path $absoluteExportDir "main.tf"
+    $providerTfPath = Join-Path $absoluteExportDir "provider.tf"
+    $dataSourcesTfPath = Join-Path $absoluteExportDir "data-sources.tf"
+    $terraformTfPath = Join-Path $absoluteExportDir "terraform.tf"
+    $variablesTfPath = Join-Path $absoluteExportDir "variables.tf"
+    $outputsTfPath = Join-Path $absoluteExportDir "outputs.tf"
+
+    # Process main.tf
+    if (Test-Path $mainTfPath) {
+        $mainTfContent = Get-Content $mainTfPath -Raw
+        
+        # Remove ALL terraform and import blocks using brace counting
+        $mainTfContent = Remove-TerraformBlocks -text $mainTfContent
+        
+        # Extract provider blocks to separate file (if not already created during merge)
+        if (-not (Test-Path $providerTfPath)) {
+            # Extract provider blocks line by line with brace counting
+            $lines = $mainTfContent -split "`r?`n"
+            $providerBlocks = @()
+            $inProvider = $false
+            $currentBlock = @()
+            $braceCount = 0
+            
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                
+                if ($line -match '^\s*provider\s+"[^"]+"\s*\{') {
+                    $inProvider = $true
+                    $currentBlock = @($line)
+                    $braceCount = 1
+                    continue
+                }
+                
+                if ($inProvider) {
+                    $currentBlock += $line
+                    $openBraces = ($line.ToCharArray() | Where-Object { $_ -eq '{' }).Count
+                    $closeBraces = ($line.ToCharArray() | Where-Object { $_ -eq '}' }).Count
+                    $braceCount += $openBraces - $closeBraces
+                    
+                    if ($braceCount -le 0) {
+                        $providerBlocks += ($currentBlock -join "`n")
+                        $inProvider = $false
+                        $currentBlock = @()
+                        $braceCount = 0
+                    }
+                }
+            }
+            
+            if ($providerBlocks.Count -gt 0) {
+                $providerContent = ($providerBlocks -join "`n`n")
+                Set-Content -Path $providerTfPath -Value $providerContent -Encoding UTF8
+                Write-Host "  Created provider.tf with $($providerBlocks.Count) provider(s)" -ForegroundColor Green
+                
+                # Remove from main.tf
+                $mainTfContent = Remove-TerraformBlocks -text $mainTfContent
+            }
+        } else {
+            # Provider file already created, ensure no provider blocks in main.tf
+            $mainTfContent = Remove-TerraformBlocks -text $mainTfContent
+        }
+        
+        # Remove sensitive values
+        $mainTfContent = $mainTfContent -replace '(client_secret\s*=\s*"[^"]*")', 'client_secret = "***REMOVED***"'
+        $mainTfContent = $mainTfContent -replace '(access_key\s*=\s*"[^"]*")', 'access_key = "***REMOVED***"'
+        $mainTfContent = $mainTfContent -replace '(connection_string\s*=\s*"[^"]*")', 'connection_string = "***REMOVED***"'
+        $mainTfContent = $mainTfContent -replace '(password\s*=\s*"[^"]*")', 'password = "***REMOVED***"'
+        
+        # Remove any orphaned config lines that might remain
+        $mainTfContent = $mainTfContent -replace '(?m)^\s*subscription_id\s*=.*$', ''
+        $mainTfContent = $mainTfContent -replace '(?m)^\s*resource_group_name\s*=.*$', ''
+        
+        # Clean up multiple blank lines
+        $mainTfContent = $mainTfContent -replace '(`r?`n\s*){3,}', "`n`n"
+        
+        # Ensure content is valid before writing
+        if (-not [string]::IsNullOrWhiteSpace($mainTfContent.Trim())) {
+            # Validate that we have actual resource blocks, not just comments
+            if ($mainTfContent -match 'resource\s+"') {
+                Set-Content -Path $mainTfPath -Value $mainTfContent.Trim() -Encoding UTF8
+                Write-Host "  Updated main.tf (cleaned up orphaned content)" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: No valid resource blocks found in main.tf after cleanup" -ForegroundColor Yellow
+                # Keep the file but add a warning
+                "# WARNING: No resource blocks were successfully extracted`n" + $mainTfContent.Trim() | Set-Content -Path $mainTfPath -Encoding UTF8
+            }
+        } else {
+            Write-Host "  WARNING: main.tf would be empty after cleanup - check export logs" -ForegroundColor Red
+            "# ERROR: Export produced no valid Terraform resources`n# Check the export logs and verify the resource group has exportable resources" | Set-Content -Path $mainTfPath -Encoding UTF8
+        }
+    } else {
+        Write-Host "  WARNING: main.tf not found at $mainTfPath" -ForegroundColor Yellow
+    }
+
+    # Ensure terraform.tf exists with required_providers (always create for consistency)
+    $terraformContent = @"
+terraform {
+  required_version = ">= 1.0.0"
+  
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
+"@
+    Set-Content -Path $terraformTfPath -Value $terraformContent -Encoding UTF8
+    Write-Host "  Created terraform.tf" -ForegroundColor Green
+
+    # Ensure provider.tf exists (create with default if not present)
+    if (-not (Test-Path $providerTfPath)) {
+        $providerContent = @"
+provider "azurerm" {
+  features {}
+  subscription_id = var.subscription_id
+}
+"@
+        Set-Content -Path $providerTfPath -Value $providerContent -Encoding UTF8
+        Write-Host "  Created provider.tf with default azurerm provider" -ForegroundColor Green
+    }
+
+    # Extract data sources from main.tf to data-sources.tf
+    if (Test-Path $mainTfPath) {
+        $mainContent = Get-Content $mainTfPath -Raw
+        
+        # Extract all data blocks using improved regex
+        $dataPattern = 'data\s+"[^"]+"\s+"[^"]+"\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        $dataBlockMatches = [regex]::Matches($mainContent, $dataPattern)
+        
+        if ($dataBlockMatches.Count -gt 0) {
+            $dataBlocks = @()
+            foreach ($match in $dataBlockMatches) {
+                $dataBlocks += $match.Value
+            }
+            
+            # Create data-sources.tf with extracted blocks
+            $dataSourcesHeader = "# Data Sources`n# Reference existing Azure resources not managed by this configuration`n`n"
+            $dataSourcesContent = $dataSourcesHeader + ($dataBlocks -join "`n`n")
+            Set-Content -Path $dataSourcesTfPath -Value $dataSourcesContent -Encoding UTF8
+            Write-Host "  Created data-sources.tf with $($dataBlocks.Count) data source(s)" -ForegroundColor Green
+            
+            # Remove data blocks from main.tf
+            $mainContent = $mainContent -replace $dataPattern, ''
+            $mainContent = $mainContent -replace '(`r?`n\s*){3,}', "`n`n"
+            
+            if (-not [string]::IsNullOrWhiteSpace($mainContent.Trim())) {
+                Set-Content -Path $mainTfPath -Value $mainContent.Trim() -Encoding UTF8
+                Write-Host "  Removed data sources from main.tf" -ForegroundColor Green
+            }
+        } else {
+            # No data sources found, create placeholder
+            if (-not (Test-Path $dataSourcesTfPath)) {
+                $dataSourcesContent = @"
+# Data Sources
+# Reference existing Azure resources not managed by this configuration
+"@
+                Set-Content -Path $dataSourcesTfPath -Value $dataSourcesContent -Encoding UTF8
+                Write-Host "  Created data-sources.tf (no data sources found)" -ForegroundColor Green
+            }
+        }
+    } else {
+        # main.tf doesn't exist, create placeholder data-sources.tf
+        if (-not (Test-Path $dataSourcesTfPath)) {
+            $dataSourcesContent = @"
+# Data Sources
+# Reference existing Azure resources not managed by this configuration
+"@
+            Set-Content -Path $dataSourcesTfPath -Value $dataSourcesContent -Encoding UTF8
+            Write-Host "  Created data-sources.tf (placeholder)" -ForegroundColor Green
+        }
+    }
+
+    # Create variables.tf with all standard variables
+    $variablesContent = @"
+# Variables
+variable "subscription_id" {
+  description = "Azure subscription ID"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region for resources"
+  type        = string
+  default     = "eastus"
+}
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "tags" {
+  description = "Common tags for all resources"
+  type        = map(string)
+  default     = {}
+}
+"@
+    Set-Content -Path $variablesTfPath -Value $variablesContent -Encoding UTF8
+    Write-Host "  Created variables.tf" -ForegroundColor Green
+
+    # Create outputs.tf with standard structure
+    $outputsContent = @"
+# Outputs
+# Define outputs for important resource attributes
+
+output "resource_group_name" {
+  description = "Name of the resource group"
+  value       = var.resource_group_name
+}
+
+output "location" {
+  description = "Azure region"
+  value       = var.location
+}
+
+# Add specific resource outputs as needed
+# Example:
+# output "resource_id" {
+#   description = "ID of the resource"
+#   value       = azurerm_resource.example.id
+# }
+"@
+    Set-Content -Path $outputsTfPath -Value $outputsContent -Encoding UTF8
+    Write-Host "  Created outputs.tf" -ForegroundColor Green
+
+    Write-Host "Standards enforcement completed" -ForegroundColor Green
+    
+    # Verify all required files exist
+    Write-Host "`nVerifying Terraform file structure..." -ForegroundColor Cyan
+    $requiredFiles = @("main.tf", "provider.tf", "terraform.tf", "data-sources.tf", "variables.tf", "outputs.tf", "terraform.tfstate")
+    $missingFiles = @()
+    $existingFiles = @()
+    
+    foreach ($fileName in $requiredFiles) {
+        $filePath = Join-Path $absoluteExportDir $fileName
+        if (Test-Path $filePath) {
+            $fileSize = (Get-Item $filePath).Length
+            $existingFiles += "  ✓ $fileName ($fileSize bytes)"
+        } else {
+            $missingFiles += "  ✗ $fileName (MISSING)"
+        }
     }
     
+    foreach ($file in $existingFiles) {
+        Write-Host $file -ForegroundColor Green
+    }
+    
+    if ($missingFiles.Count -gt 0) {
+        Write-Host "`nMissing files:" -ForegroundColor Yellow
+        foreach ($file in $missingFiles) {
+            Write-Host $file -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "`n✓ All required Terraform files created successfully!" -ForegroundColor Green
+    }
+
     # ===========================================
-    # AUTOMATED DATA SOURCE GENERATION
+    # AUTOMATED DATA SOURCE GENERATION (moved before HTML report)
     # ===========================================
-    Write-Host "Analyzing references..." -ForegroundColor Cyan
+    Write-Host "`nAnalyzing references..." -ForegroundColor Cyan
     
     try {
         # Read main.tf to find hardcoded Azure resource IDs
-        $mainTfPath = Join-Path $exportDir "main.tf"
+        $mainTfPath = Join-Path $absoluteExportDir "main.tf"
         
-        if (-not (Test-Path $mainTfPath)) {
-            throw "main.tf not found"
-        }
-        
-        $mainTfContent = Get-Content -Path $mainTfPath -Raw -ErrorAction Stop
-        
-        # Extract all Azure resource IDs
-        $resourceIdPattern = '"/subscriptions/[a-f0-9\-]+/resourceGroups/[^/]+/providers/Microsoft\.[^/]+/[^/"]+/[^/"]+(?:/[^/"]+/[^/"]+)*"'
-        
-        $foundResourceIds = [regex]::Matches($mainTfContent, $resourceIdPattern) | ForEach-Object { $_.Value.Trim('"') } | Select-Object -Unique
-        
-        if ($foundResourceIds.Count -gt 0) {
+        if (Test-Path $mainTfPath) {
+            $mainTfContent = Get-Content -Path $mainTfPath -Raw -ErrorAction Stop
+            
+            # Extract all Azure resource IDs
+            $resourceIdPattern = '"/subscriptions/[a-f0-9\-]+/resourceGroups/[^/]+/providers/Microsoft\.[^/]+/[^/"]+/[^/"]+(?:/[^/"]+/[^/"]+)*"'
+            
+            $foundResourceIds = [regex]::Matches($mainTfContent, $resourceIdPattern) | ForEach-Object { $_.Value.Trim('"') } | Select-Object -Unique
+            
+            if ($foundResourceIds.Count -gt 0) {
+                Write-Host "  Found $($foundResourceIds.Count) external resource reference(s)" -ForegroundColor Gray
+                
                 # Parse resource IDs and generate data sources
                 $dataSourcesContent = Get-TerraformFileHeader -FileName "data-sources.tf" -Description "Data sources for external Azure resources referenced by this configuration. These resources are managed outside this Terraform state and are referenced as read-only."
                 
@@ -1002,13 +1573,12 @@ data "$terraformType" "$dataSourceName" {
                 
                 # Create data-sources.tf file if we generated any data sources
                 if ($generatedDataSources.Count -gt 0) {
-                    $dataSourcesPath = Join-Path $exportDir "data-sources.tf"
+                    $dataSourcesPath = Join-Path $absoluteExportDir "data-sources.tf"
                     
                     Set-Content -Path $dataSourcesPath -Value $dataSourcesContent -Encoding UTF8 -ErrorAction Stop
-                    Write-Host "Created $($generatedDataSources.Count) data sources" -ForegroundColor Green
+                    Write-Host "  ✓ Created $($generatedDataSources.Count) data source(s)" -ForegroundColor Green
                     
                     # Update main.tf to replace hardcoded IDs with data source references
-                    
                     try {
                         $updatedMainTf = $mainTfContent
                         $replacementCount = 0
@@ -1022,105 +1592,41 @@ data "$terraformType" "$dataSourceName" {
                         
                         if ($replacementCount -gt 0) {
                             Set-Content -Path $mainTfPath -Value $updatedMainTf -Encoding UTF8 -ErrorAction Stop
-                            Write-Host "Updated $replacementCount references in main.tf" -ForegroundColor Green
+                            Write-Host "  ✓ Updated $replacementCount reference(s) in main.tf" -ForegroundColor Green
                         }
                     }
                     catch {
-                        Write-Host "Warning: Could not update main.tf with data source references" -ForegroundColor Yellow
+                        Write-Host "  ! Warning: Failed to update main.tf references: $($_.Exception.Message)" -ForegroundColor Yellow
                     }
                 } else {
-                    Write-Host "No external references found" -ForegroundColor Gray
+                    Write-Host "  No data sources generated (no external references found)" -ForegroundColor Gray
                 }
+            } else {
+                Write-Host "  No external resource references found" -ForegroundColor Gray
             }
-    }
-    catch {
-        Write-Host "Warning: Data source generation failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-    
-    # ===========================================
-    # ADD HEADERS TO ALL GENERATED TERRAFORM FILES
-    # ===========================================
-    Write-Host "Adding file headers..." -ForegroundColor Cyan
-    
-    try {
-        # Define file descriptions
-        $fileDescriptions = @{
-            "main.tf" = "Main Terraform configuration containing all Azure resource definitions exported from the resource group."
-            "provider.tf" = "Azure provider configuration and authentication settings for Terraform."
-            "terraform.tf" = "Terraform backend and required provider version constraints."
-            "variables.tf" = "Input variable definitions for parameterizing the Terraform configuration."
-            "outputs.tf" = "Output value definitions to expose resource attributes after deployment."
-        }
-        
-        # Add headers to each Terraform file
-        foreach ($file in $fileDescriptions.Keys) {
-            $filePath = Join-Path $exportDir $file
-            
-            if (Test-Path $filePath) {
-                try {
-                    $currentContent = Get-Content -Path $filePath -Raw -Encoding UTF8
-                    
-                    if ($currentContent -notmatch "# FILE:") {
-                        $header = Get-TerraformFileHeader -FileName $file -Description $fileDescriptions[$file]
-                        $newContent = $header + $currentContent
-                        Set-Content -Path $filePath -Value $newContent -Encoding UTF8
-                    }
-                }
-                catch {
-                    # Silently continue on header addition errors
-                }
-            }
+        } else {
+            Write-Host "  main.tf not found, skipping data source generation" -ForegroundColor Yellow
         }
     }
     catch {
-        Write-Host "Warning: Could not add headers" -ForegroundColor Yellow
+        Write-Host "  ! Warning: Data source generation failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    
-    Write-Host ""
-    
+
     # ===========================================
-    # CONTINUE WITH REPORT GENERATION
+    # GENERATE DETAILED HTML REPORT (Before Upload)
     # ===========================================
+    Write-Host "`nGenerating detailed HTML export report..." -ForegroundColor Cyan
     
-    # Get all Terraform files
-    $tfFiles = Get-ChildItem -Path $exportDir -Filter "*.tf" -File
-    $tfFileCount = $tfFiles.Count
-    
-    # Parse resource types from Terraform files
-    $resourceTypes = @{}
-    
-    foreach ($file in $tfFiles) {
-        $content = Get-Content -Path $file.FullName -Raw
-        # Match resource blocks: resource "type" "name"
-        $matches = [regex]::Matches($content, 'resource\s+"([^"]+)"\s+"([^"]+)"')
-        
-        foreach ($match in $matches) {
-            $resourceType = $match.Groups[1].Value
-            if ($resourceTypes.ContainsKey($resourceType)) {
-                $resourceTypes[$resourceType]++
-            }
-            else {
-                $resourceTypes[$resourceType] = 1
-            }
-        }
-    }
-    
-    # Calculate totals
-    $sortedResources = $resourceTypes.GetEnumerator() | Sort-Object Value -Descending
-    $totalResources = ($resourceTypes.Values | Measure-Object -Sum).Sum
-    
-    # Calculate export end time
-    $exportEndDate = Get-Date -Format "yyyy-MM-dd"
-    $exportEndTime = Get-Date -Format "HH:mm:ss"
     $exportEndDateTime = Get-Date
     $exportDuration = $exportEndDateTime - $exportStartDateTime
+    $exportStartDate = $exportStartDateTime.ToString("yyyy-MM-dd")
+    $exportStartTime = $exportStartDateTime.ToString("HH:mm:ss")
     
-    # Generate HTML Report
-    Write-Host ""
-    Write-Host "Generating HTML export report..." -ForegroundColor Cyan
+    # Get all Terraform files for report
+    $tfFiles = Get-ChildItem -Path $absoluteExportDir -Filter "*.tf" -File -ErrorAction SilentlyContinue
+    Write-Host "  Found $($tfFiles.Count) .tf files for report" -ForegroundColor Gray
     
-    # Use consistent filename (without timestamp) to ensure only latest report is kept
-    $reportFile = Join-Path $exportDir "Export-Report-Latest.html"
+    $reportFile = Join-Path $absoluteExportDir "Export-Report-Latest.html"
     
     # Parse individual resources from Terraform files
     $detailedResources = @()
@@ -1162,14 +1668,12 @@ data "$terraformType" "$dataSourceName" {
         }
     }
     
-    # Get file locations
-    $mainTfPath = Join-Path $exportDir "main.tf"
-    $providerTfPath = Join-Path $exportDir "provider.tf"
-    $terraformTfPath = Join-Path $exportDir "terraform.tf"
-    $variablesTfPath = Join-Path $exportDir "variables.tf"
-    $outputsTfPath = Join-Path $exportDir "outputs.tf"
-    $dataSourcesTfPath = Join-Path $exportDir "data-sources.tf"
-    $tfstatePath = Join-Path $exportDir "terraform.tfstate"
+    # Get file locations for report
+    $mainTfPath = Join-Path $absoluteExportDir "main.tf"
+    $providerTfPath = Join-Path $absoluteExportDir "provider.tf"
+    $terraformTfPath = Join-Path $absoluteExportDir "terraform.tf"
+    $dataSourcesTfPath = Join-Path $absoluteExportDir "data-sources.tf"
+    $tfstatePath = Join-Path $absoluteExportDir "terraform.tfstate"
     
     # Count resources
     $numExportedResources = $detailedResources.Count
@@ -1180,7 +1684,7 @@ data "$terraformType" "$dataSourceName" {
     $referenceResourcesByType = $detailedResources | Where-Object { $_.Status -eq "Reference" } | Group-Object -Property ExportedResourceType | Select-Object @{Name='ResourceType';Expression={$_.Name}}, @{Name='Count';Expression={$_.Count}} | Sort-Object Count -Descending
     $importedResourcesByType = $importedResources | Group-Object -Property ImportedResourceType | Select-Object @{Name='ResourceType';Expression={$_.Name}}, @{Name='Count';Expression={$_.Count}} | Sort-Object Count -Descending
     
-    # Build HTML Report
+    # Build HTML Report (Complete detailed version)
     $htmlContent = @"
 <!DOCTYPE html>
 <html>
@@ -1216,14 +1720,10 @@ data "$terraformType" "$dataSourceName" {
         table td { padding: 12px; font-size: 13px; }
         .status-managed { background: #28A745; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
         .status-reference { background: #FFC107; color: #333; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
-        .success { background-color: #dff6dd; color: #107c10; font-weight: bold; padding: 8px; }
-        .warning { background-color: #fff4ce; color: #795e00; font-weight: bold; padding: 8px; }
-        .neutral { background-color: #f3f2f1; color: #323130; padding: 8px; }
         .type-count { display: flex; justify-content: space-between; padding: 10px 15px; background: #F8F9FA; margin-bottom: 5px; border-radius: 3px; border-left: 3px solid #4472C4; }
         .type-name { font-weight: 500; color: #333; }
         .type-number { font-weight: bold; color: #4472C4; background: white; padding: 2px 8px; border-radius: 3px; }
         .footer { background: #F8F9FA; padding: 20px 30px; text-align: center; color: #666; font-size: 14px; border-top: 2px solid #E0E0E0; }
-        .highlight-box { background: #E3F2FD; border-left: 4px solid #2196F3; padding: 15px; margin: 15px 0; border-radius: 4px; }
         .file-list { list-style: none; padding-left: 0; }
         .file-list li { background: #F8F9FA; padding: 10px 15px; margin-bottom: 8px; border-left: 3px solid #4472C4; border-radius: 3px; }
         .file-status { color: #28A745; font-weight: bold; }
@@ -1296,7 +1796,7 @@ data "$terraformType" "$dataSourceName" {
                 <div class="section-title">Terraform Files Generated</div>
                 <div class="info-item" style="margin-bottom: 15px;">
                     <div class="info-label">Output Directory</div>
-                    <div class="info-value">$exportDir</div>
+                    <div class="info-value">$absoluteExportDir</div>
                 </div>
                 <ul class="file-list">
                     <li><strong>main.tf</strong> - $(if (Test-Path $mainTfPath) { '<span class="file-status">✓ Generated</span>' } else { 'Not Generated' }) - Resource definitions</li>
@@ -1328,27 +1828,6 @@ data "$terraformType" "$dataSourceName" {
     $htmlContent += @"
             </div>
             
-            <!-- Reference Resources by Type -->
-            <div class="section">
-                <div class="section-title">Reference Resources by Type</div>
-"@
-    
-    if ($referenceResourcesByType.Count -gt 0) {
-        foreach ($type in $referenceResourcesByType) {
-            $htmlContent += @"
-                <div class="type-count">
-                    <span class="type-name">$($type.ResourceType)</span>
-                    <span class="type-number">$($type.Count)</span>
-                </div>
-"@
-        }
-    } else {
-        $htmlContent += '<p style="color: #666; font-style: italic;">No reference resources found.</p>'
-    }
-    
-    $htmlContent += @"
-            </div>
-            
             <!-- Detailed Resource Listing -->
             <div class="section">
                 <div class="section-title">Exported Resources - Detailed Listing</div>
@@ -1359,7 +1838,6 @@ data "$terraformType" "$dataSourceName" {
                             <th>Resource Type</th>
                             <th>Status</th>
                             <th>File</th>
-                            <th>Description</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1367,11 +1845,6 @@ data "$terraformType" "$dataSourceName" {
     
     foreach ($resource in $detailedResources) {
         $statusClass = if ($resource.Status -eq "Managed") { "status-managed" } else { "status-reference" }
-        $description = if ($resource.Status -eq "Reference") { 
-            "REFERENCE ONLY - Imported from existing Azure. Will NOT be created/modified/destroyed by Terraform." 
-        } else { 
-            "MANAGED - Will be fully managed by Terraform (create/update/destroy)." 
-        }
         
         $htmlContent += @"
                         <tr>
@@ -1379,7 +1852,6 @@ data "$terraformType" "$dataSourceName" {
                             <td>$($resource.ExportedResourceType)</td>
                             <td><span class="$statusClass">$($resource.Status)</span></td>
                             <td>$($resource.File)</td>
-                            <td>$description</td>
                         </tr>
 "@
     }
@@ -1387,55 +1859,12 @@ data "$terraformType" "$dataSourceName" {
     $htmlContent += @"
                     </tbody>
                 </table>
-            </div>
-            
-            <!-- Data Sources / Reference Only Resources -->
-            <div class="section">
-                <div class="section-title">Data Sources - Reference Only</div>
-"@
-    
-    if ($importedResources.Count -gt 0) {
-        $htmlContent += @"
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Resource Name</th>
-                            <th>Resource Type</th>
-                            <th>Azure Resource ID</th>
-                            <th>File</th>
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-"@
-        
-        foreach ($resource in $importedResources) {
-            $htmlContent += @"
-                        <tr>
-                            <td>$($resource.ImportedResourceName)</td>
-                            <td>$($resource.ImportedResourceType)</td>
-                            <td>$($resource.AzureResourceId)</td>
-                            <td>$($resource.File)</td>
-                            <td>DATA SOURCE - Existing Azure resource referenced via data-sources.tf. Terraform will NOT create/modify/destroy this resource.</td>
-                        </tr>
-"@
-        }
-        
-        $htmlContent += @"
-                    </tbody>
-                </table>
-"@
-    } else {
-        $htmlContent += '<p style="color: #666; font-style: italic;">No data sources found.</p>'
-    }
-    
-    $htmlContent += @"
             </div>
         </div>
         
         <div class="footer">
             <p>Report Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
-            <p>Azure to Terraform Export Tool</p>
+            <p>Azure to Terraform Export Tool v2.1</p>
         </div>
     </div>
 </body>
@@ -1445,29 +1874,118 @@ data "$terraformType" "$dataSourceName" {
     # Save HTML report
     try {
         $htmlContent | Out-File -FilePath $reportFile -Encoding UTF8
-        Write-Host "Report generated: Export-Report-Latest.html" -ForegroundColor Green
+        Write-Host "  ✓ Detailed HTML report generated: Export-Report-Latest.html" -ForegroundColor Green
     }
     catch {
-        Write-Host ""
-        Write-Host "========================================" -ForegroundColor Red
-        Write-Host "  ERROR: HTML Report Generation Failed" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "ISSUE:" -ForegroundColor Yellow
-        Write-Host "  Unable to generate HTML report" -ForegroundColor White
-        Write-Host ""
-        Write-Host "ERROR MESSAGE:" -ForegroundColor Yellow
-        Write-Host "  $($_.Exception.Message)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "NOTE:" -ForegroundColor Yellow
-        Write-Host "  Terraform files were still generated successfully" -ForegroundColor Green
-        Write-Host "  Only the HTML report failed to generate" -ForegroundColor Gray
-        Write-Host ""
+        Write-Host "  ! Warning: Failed to create HTML report: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 5. STORAGE UPLOAD (with error handling)
+    Write-Host "`nUploading results to Storage..." -ForegroundColor Cyan
+    $blobPath = "$($SubscriptionId)/$($ResourceGroupName)"
+    
+    $account = $env:storageAccount
+    $container = "aztfexport"
+    
+    if ([string]::IsNullOrEmpty($account)) {
+        Write-Host "  ! Warning: storageAccount not configured, skipping upload" -ForegroundColor Yellow
+        Write-Host "  Files available at: $absoluteExportDir" -ForegroundColor Cyan
+    } else {
+        Write-Host "  Account: $account" -ForegroundColor Gray
+        Write-Host "  Container: $container" -ForegroundColor Gray
+        Write-Host "  Path: $blobPath" -ForegroundColor Gray
+        Write-Host "  Source: $absoluteExportDir" -ForegroundColor Gray
+        
+        try {
+            $uploadOutput = az storage blob upload-batch `
+                --account-name $account `
+                --destination $container `
+                --destination-path $blobPath `
+                --source $absoluteExportDir `
+                --pattern "*" `
+                --auth-mode login `
+                --overwrite 2>&1
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  ✓ Upload completed successfully" -ForegroundColor Green
+                Write-Host "  URL: https://$account.blob.core.windows.net/$container/$blobPath/" -ForegroundColor Cyan
+            } else {
+                Write-Host "  ! Upload failed (exit code: $LASTEXITCODE)" -ForegroundColor Yellow
+                Write-Host "  Files still available at: $absoluteExportDir" -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Host "  ! Upload error: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "  Files still available at: $absoluteExportDir" -ForegroundColor Cyan
+        }
     }
     
-    # Upload exported files to Azure Blob Storage
+    Write-Host "`n=== Export Completed Successfully ===" -ForegroundColor Green
+    Write-Host "Resource Group: $ResourceGroupName" -ForegroundColor White
+    Write-Host "Resources: $numExportedResources" -ForegroundColor Yellow
+    Write-Host "Duration: $('{0:hh\:mm\:ss}' -f $exportDuration)" -ForegroundColor Cyan
+    Write-Host "Location: $absoluteExportDir" -ForegroundColor Cyan
+    Write-Host "Report: $reportFile" -ForegroundColor Cyan
+
+} catch {
+    Write-Host "FATAL ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+    
+    # ===========================================
+    # ADD HEADERS TO ALL GENERATED TERRAFORM FILES
+    # ===========================================
+    Write-Host "Adding file headers..." -ForegroundColor Cyan
+    
+    try {
+        # Define file descriptions
+        $fileDescriptions = @{
+            "main.tf" = "Main Terraform configuration containing all Azure resource definitions exported from the resource group."
+            "provider.tf" = "Azure provider configuration and authentication settings for Terraform."
+            "terraform.tf" = "Terraform backend and required provider version constraints."
+            "variables.tf" = "Input variable definitions for parameterizing the Terraform configuration."
+            "outputs.tf" = "Output value definitions to expose resource attributes after deployment."
+        }
+        
+        # Add headers to each Terraform file
+        foreach ($file in $fileDescriptions.Keys) {
+            $filePath = Join-Path $absoluteExportDir $file
+            
+            if (Test-Path $filePath) {
+                try {
+                    $currentContent = Get-Content -Path $filePath -Raw -Encoding UTF8
+                    
+                    if ($currentContent -notmatch "# FILE:") {
+                        $header = Get-TerraformFileHeader -FileName $file -Description $fileDescriptions[$file]
+                        $newContent = $header + $currentContent
+                        Set-Content -Path $filePath -Value $newContent -Encoding UTF8
+                    }
+                }
+                catch {
+                    # Silently continue on header addition errors
+                }
+            }
+        }
+    }
+    catch {
+        Write-Host "Warning: Could not add headers" -ForegroundColor Yellow
+    }
+    
     Write-Host ""
-    Write-Host "Uploading to Azure Storage..." -ForegroundColor Cyan
+    Write-Host "=== Post-Processing Complete ===" -ForegroundColor Green
+    Write-Host "All Terraform files standardized with headers" -ForegroundColor White
+    Write-Host "HTML report already generated before upload" -ForegroundColor White
+    Write-Host ""
+    
+    # Upload exported files to Azure Blob Storage
+    # Note: In container mode, upload already happened after post-processing
+    # This section is kept for backward compatibility with local/non-container runs
+    
+    if ($isContainer) {
+        Write-Host ""
+        Write-Host "Container mode: Upload already completed" -ForegroundColor Gray
+    } else {
+        Write-Host ""
+        Write-Host "Uploading to Azure Storage..." -ForegroundColor Cyan
     
     # Get storage account resource group from environment variable or use default
     $StorageAccountRG = if ([string]::IsNullOrEmpty($env:storageAccountRG)) { $ResourceGroupName } else { $env:storageAccountRG }
@@ -1553,7 +2071,7 @@ data "$terraformType" "$dataSourceName" {
         Write-Host "Storage: https://$StorageAccount.blob.core.windows.net/$StorageContainer/$SubscriptionId/$ResourceGroupName/" -ForegroundColor Cyan
         
         # Check if GitHub output is also enabled
-        $envFilePath = Join-Path $scriptDir "..\.env"
+        $envFilePath = Join-Path (Split-Path $scriptDir -Parent) ".env"
         if (Test-Path $envFilePath) {
             $envConfig = @{}
             Get-Content $envFilePath | ForEach-Object {
@@ -1569,7 +2087,7 @@ data "$terraformType" "$dataSourceName" {
                 Write-Host ""
                 Write-Host "=== Uploading to GitHub ===" -ForegroundColor Cyan
                 
-                Import-Module "$PSScriptRoot\GitHubHelper.psm1" -Force
+                Import-Module (Join-Path $PSScriptRoot "GitHubHelper.psm1") -Force
                 
                 $githubParams = @{
                     LocalDirectory = $exportDir
@@ -1609,6 +2127,8 @@ data "$terraformType" "$dataSourceName" {
         Write-Host "Files available at: $exportDir" -ForegroundColor Gray
     }
     
+    } # End of non-container mode upload
+    
     # Display Final Export Summary
     Write-Host ""
     Write-Host "=== Export Completed Successfully ===" -ForegroundColor Green
@@ -1621,4 +2141,10 @@ data "$terraformType" "$dataSourceName" {
     Write-Host "  2. terraform validate" -ForegroundColor Gray
     Write-Host "  3. terraform plan" -ForegroundColor Gray
     Write-Host ""
+
+        # === Standards Enforcement: Post-process Terraform files ===
+        $mainTfPath = Join-Path $absoluteExportDir "main.tf"
+        $providerTfPath = Join-Path $absoluteExportDir "provider.tf"
+        $dataSourcesTfPath = Join-Path $absoluteExportDir "data-sources.tf"
+
 

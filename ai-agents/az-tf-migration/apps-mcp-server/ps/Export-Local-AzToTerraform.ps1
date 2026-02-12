@@ -685,131 +685,116 @@ if ($resources) {
     Write-Host ""
     Write-Host "Running aztfexport..." -ForegroundColor Cyan
     try {
-        # Check if aztfexport is available
-        $aztfexportPath = Get-Command aztfexport -ErrorAction SilentlyContinue
-        if (-not $aztfexportPath) {
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host "  ERROR: aztfexport Not Found" -ForegroundColor Red
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  aztfexport is required but not found in PATH." -ForegroundColor White
-            Write-Host ""
-            Write-Host "  To install aztfexport:" -ForegroundColor Yellow
-            Write-Host "    Windows: winget install aztfexport" -ForegroundColor Gray
-            Write-Host "    macOS: brew install aztfexport" -ForegroundColor Gray
-            Write-Host "    Linux: Download from https://github.com/Azure/aztfexport/releases" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  Or visit: https://github.com/Azure/aztfexport" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            exit 1
-        }
+    # 1. Environment Guardrails
+    $env:NO_COLOR = "1"
+    $env:TERM = "xterm"
+    $env:AZURE_EXTENSION_QUIET = "true"
+    $global:globalSuccess = $true 
 
-        Write-Host "aztfexport found: $($aztfexportPath.Source)" -ForegroundColor Green
-
-        # Verify export directory is truly empty before running aztfexport
-        $dirContents = Get-ChildItem -Path $exportDir -Force -ErrorAction SilentlyContinue
-        if ($dirContents) {
-            Write-Host "WARNING: Export directory is not empty! Contents:" -ForegroundColor Yellow
-            $dirContents | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-            Write-Host "Cleaning directory again..." -ForegroundColor Yellow
-            Remove-Item -Path "$exportDir\*" -Recurse -Force
-        }
-        Write-Host "Export directory verified empty: $exportDir" -ForegroundColor Green
-
-        # Export resources individually for speed, then consolidate files
-        Write-Host "Exporting $($exportableResources.Count) resources individually..." -ForegroundColor Cyan
-        $exportCount = 0
-        
-        foreach ($resource in $exportableResources) {
-            $exportCount++
-            $resourceName = $resource.name
-            $resourceId = $resource.id
-            
-            Write-Host "[$exportCount/$($exportableResources.Count)] Exporting: $resourceName" -ForegroundColor Yellow
-            
-            # Export each resource (creates/appends to files)
-            if ($exportCount -eq 1) {
-                # First resource: create base directory and files
-                aztfexport resource `
-                    --subscription-id $SubscriptionId `
-                    --output-dir $exportDir `
-                    --non-interactive `
-                    $resourceId 2>&1 | Out-Null
-            } else {
-                # Subsequent resources: append to existing files
-                aztfexport resource `
-                    --subscription-id $SubscriptionId `
-                    --output-dir $exportDir `
-                    --non-interactive `
-                    --append `
-                    $resourceId 2>&1 | Out-Null
-            }
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  ✓ Success" -ForegroundColor Green
-            } else {
-                    Write-Host "  ✗ Failed" -ForegroundColor Red
-                    Write-Host "    Error: $($Error[0])" -ForegroundColor Yellow
-            }
-        }
-        
-        # Consolidate .aztfexport files into main.tf
-        Write-Host ""
-        Write-Host "Consolidating Terraform files..." -ForegroundColor Cyan
-        
-        $mainTfPath = Join-Path $exportDir "main.tf"
-        $mainContent = ""
-        
-        # Read main.tf if it exists
-        if (Test-Path $mainTfPath) {
-            $mainContent = Get-Content $mainTfPath -Raw
-        }
-        
-        # Find and merge all .aztfexport files
-        $aztfexportFiles = Get-ChildItem -Path $exportDir -Filter "*.aztfexport.tf" -ErrorAction SilentlyContinue
-        foreach ($file in $aztfexportFiles) {
-            $content = Get-Content $file.FullName -Raw
-            $mainContent += "`n`n" + $content
-            Remove-Item $file.FullName -Force
-            Write-Host "  Merged: $($file.Name)" -ForegroundColor Gray
-        }
-        
-        # Write consolidated main.tf
-        if ($mainContent) {
-            Set-Content -Path $mainTfPath -Value $mainContent.Trim() -Force
-            Write-Host "  ✓ Consolidated all resources into main.tf" -ForegroundColor Green
-        }
-        
-        $LASTEXITCODE = 0
-
-        # Check if command succeeded
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host "  EXPORT FAILED - aztfexport Error" -ForegroundColor Red
-            Write-Host ('=' * 80) -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  Export Details:" -ForegroundColor White
-            Write-Host "    Resource Group: $ResourceGroupName" -ForegroundColor White
-            Write-Host "    Subscription: $subscriptionName" -ForegroundColor White
-            Write-Host "    Exit Code: $LASTEXITCODE" -ForegroundColor White
-            Write-Host ""
-            Write-Host ('=' * 80) -ForegroundColor Red
-            exit 1
-        }
-        
-        Write-Host ""
-        Write-Host "Export completed successfully!" -ForegroundColor Green
-        Write-Host ""
+    # 2. Setup Master Directory
+    $absoluteExportDir = [System.IO.Path]::GetFullPath($exportDir)
+    if (Test-Path $absoluteExportDir) {
+        Remove-Item -Path "$absoluteExportDir\*" -Recurse -Force -ErrorAction SilentlyContinue
     }
-    catch {
-        Write-Host ""
-        Write-Host "ERROR: aztfexport execution failed" -ForegroundColor Red
-        Write-Host "$($_.Exception.Message)" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $absoluteExportDir -Force | Out-Null
+    
+    # Initialize Master Files
+    $masterMainTf = Join-Path $absoluteExportDir "main.tf"
+    $masterProviderTf = Join-Path $absoluteExportDir "provider.tf"
+    "# Generated Terraform Configuration`n" | Out-File -FilePath $masterMainTf -Encoding UTF8 -Force
+
+    # 3. RESOURCE LOOP (Sandboxed Mode)
+    Write-Host "Starting Export Job (Sandbox Mode)..." -ForegroundColor Cyan
+    $exportCount = 0
+
+    foreach ($resource in $exportableResources) {
+        $exportCount++
+        Write-Host "[$exportCount/$($exportableResources.Count)] Processing: $($resource.name)" -ForegroundColor Yellow
+
+        # Create a unique sandbox for this specific resource
+        $sandboxPath = Join-Path $absoluteExportDir "sb_$($exportCount)"
+        New-Item -ItemType Directory -Path $sandboxPath -Force | Out-Null
+
+        $argList = @(
+            "resource",
+            "--subscription-id", $SubscriptionId,
+            "--output-dir", $sandboxPath,  # Export to sandbox
+            "--non-interactive",
+            "--log-level", "Panic"
+        )
+        $argList += $resource.id
+        $fullCmd = "aztfexport " + ($argList -join " ")
+        
+        # Spoof TTY for the sandbox run
+        $void = script -q -c "$fullCmd" /dev/null 2>&1
+        
+        Start-Sleep -Seconds 2 # Allow disk commit
+
+        # 4. CONSOLIDATE FROM SANDBOX
+        $genFiles = Get-ChildItem -Path $sandboxPath -Filter "*.tf"
+        if ($genFiles) {
+            foreach ($file in $genFiles) {
+                $content = Get-Content $file.FullName -Raw
+                
+                # Capture Provider if missing
+                if (-not (Test-Path $masterProviderTf) -and $content -match '(?s)provider\s*"azurerm"\s*\{.*?\}') {
+                    $matches[0] | Out-File -FilePath $masterProviderTf -Encoding UTF8 -Force
+                }
+
+                # Clean and Merge
+                $clean = $content -replace '(?s)terraform\s*\{.*?\}', ''
+                $clean = $clean -replace '(?s)provider\s*"azurerm"\s*\{.*?\}', ''
+
+                if ($clean.Trim()) {
+                    "`n# --- Resource: $($resource.name) ---`n$($clean.Trim())" | Out-File -FilePath $masterMainTf -Append -Encoding UTF8
+                    Write-Host "   ✓ Merged" -ForegroundColor Green
+                }
+            }
+            # Optional: Move the state file out if you need to keep it
+            $stateFile = Join-Path $sandboxPath "terraform.tfstate"
+            if (Test-Path $stateFile) {
+                # Rename and keep states if needed, or just keep the latest one
+                Copy-Item $stateFile (Join-Path $absoluteExportDir "terraform.tfstate") -Force
+            }
+        } else {
+            Write-Host "   ! Warning: No code generated for $($resource.name)" -ForegroundColor Red
+        }
+
+        # Cleanup Sandbox immediately
+        Remove-Item $sandboxPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # 5. STORAGE UPLOAD (Fixed Syntax)
+    Write-Host "`nUploading results to Storage..." -ForegroundColor Cyan
+    $blobPath = "$($SubscriptionId)/$($ResourceGroupName)"
+    
+    # We use a direct string to prevent PowerShell from mis-parsing the arguments
+    $account = $env:storageAccount
+    $container = "aztfexport"
+    
+    Write-Host "   Source: $absoluteExportDir" -ForegroundColor Gray
+    
+    # FIXED: Upload the entire directory content
+    az storage blob upload-batch `
+        --account-name $account `
+        --destination $container `
+        --destination-path $blobPath `
+        --source $absoluteExportDir `
+        --pattern "*" `
+        --auth-mode key `
+        --overwrite
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "=== Export & Upload Completed Successfully ===" -ForegroundColor Green
+    } else {
+        Write-Host "Upload failed." -ForegroundColor Red
         exit 1
     }
+
+} catch {
+    Write-Host "FATAL ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
     
     # ===========================================
     # AUTOMATED DATA SOURCE GENERATION

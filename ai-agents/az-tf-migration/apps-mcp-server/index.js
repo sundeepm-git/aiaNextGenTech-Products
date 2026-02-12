@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 // --- MCP SERVER ---
 const server = new McpServer({
     name: "Azure-Terraform-Migration-Server",
-    version: "1.0.0"
+    version: "2.1.0"
 });
 
 // --- TOOL REGISTRATION ---
@@ -35,13 +35,14 @@ if(!isStdioMode) {
 }
 
 import { assessmentToolDefinition, assessmentToolHandler, initializeBlobStorage, executeAssessmentJob } from './tools/assessment.js';
-import { aztfexportToolDefinition, aztfexportToolHandler, executeExportJob as executeAzTfExportJob } from './tools/aztfexport.js';
+// Import the new Python tool wrapper
+import { aztfexportTool } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
 
 // Log tool registration only in HTTP/SSE mode
 if(!isStdioMode) {
     console.error(`[Tool Registration] Assessment: ${assessmentToolDefinition?.name || 'MISSING'}`);
-    console.error(`[Tool Registration] Export: ${aztfexportToolDefinition?.name || 'MISSING'}`);
+    console.error(`[Tool Registration] Export: ${aztfexportTool?.name || 'MISSING'}`);
     console.error(`[Tool Registration] Refactor: ${refactorToolDefinition?.name || 'MISSING'}`);
     console.error(`[Tool Import] All tools imported successfully`);
 }
@@ -78,28 +79,29 @@ async function executeJobWrapper(job) {
     await executeAssessmentJob(job, localReportDir, __dirname);
 }
 
-async function executeExportJobWrapper(job, progressCallback) {
-    await executeAzTfExportJob(job, __dirname, progressCallback);
-}
-
-async function executeRefactorJobWrapper(job, progressCallback) {
-    await executeRefactorJob(job, __dirname, progressCallback);
-}
-
 const toolContext = { 
     jobs: new Map(), 
     blobStorageInfo,
     executeJob: executeJobWrapper,
-    executeExportJob: executeExportJobWrapper,
-    executeRefactorJob: executeRefactorJobWrapper
+    executeRefactorJob, // Make available to refactorToolHandler
+    __dirname, // Pass ES module __dirname for refactor tool
+    // Note: Export tool handles its own jobs internally via exportJobs map in aztfexport.js
 };
 
+// 1. Register Assessment Tool
 server.tool(assessmentToolDefinition.name, assessmentToolDefinition.schema, (p) => assessmentToolHandler(p, toolContext));
 if(!isStdioMode) console.error(`[Server] ✓ Registered: ${assessmentToolDefinition.name}`);
 
-server.tool(aztfexportToolDefinition.name, aztfexportToolDefinition.schema, (p) => aztfexportToolHandler(p, toolContext));
-if(!isStdioMode) console.error(`[Server] ✓ Registered: ${aztfexportToolDefinition.name}`);
+// 2. Register Export Tool (Python Version)
+server.tool(
+    aztfexportTool.name,
+    aztfexportTool.description,
+    aztfexportTool.inputSchema.shape,
+    (args) => aztfexportTool.handler(args, server)
+);
+if(!isStdioMode) console.error(`[Server] ✓ Registered: ${aztfexportTool.name}`);
 
+// 3. Register Refactor Tool
 server.tool(refactorToolDefinition.name, refactorToolDefinition.schema, (p) => refactorToolHandler(p, toolContext));
 if(!isStdioMode) console.error(`[Server] ✓ Registered: ${refactorToolDefinition.name}`);
 
@@ -131,11 +133,11 @@ app.get("/health", (req, res) => {
     res.status(200).json({ 
         status: "healthy",
         server: "Azure-Terraform-Migration-Server",
-        version: "1.0.0",
+        version: "2.1.0",
         timestamp: new Date().toISOString(),
         tools: [
             assessmentToolDefinition.name,
-            aztfexportToolDefinition.name,
+            aztfexportTool.name, // FIXED: Now referencing the correct imported object
             refactorToolDefinition.name
         ],
         toolsCount: 3
@@ -180,8 +182,8 @@ app.get("/tools", (req, res) => {
                 description: assessmentToolDefinition.schema.description
             },
             {
-                name: aztfexportToolDefinition.name,
-                description: aztfexportToolDefinition.schema.description
+                name: aztfexportTool.name, // FIXED
+                description: aztfexportTool.description // FIXED: Description is at root level now
             },
             {
                 name: refactorToolDefinition.name,

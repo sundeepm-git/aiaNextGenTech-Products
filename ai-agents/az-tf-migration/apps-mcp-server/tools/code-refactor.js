@@ -183,6 +183,9 @@ export async function executeRefactorJob(job, __dirname, progressCallback = null
   }
 }
 
+// ES module export only (Node.js, container)
+// All exports are already using 'export' keyword above
+
 export async function refactorToolHandler({ subscriptionId, resourceGroup, refactorOptions }, context) {
   // Input validation
   if (!subscriptionId || typeof subscriptionId !== 'string' || subscriptionId.trim() === '') {
@@ -239,7 +242,8 @@ export async function refactorToolHandler({ subscriptionId, resourceGroup, refac
     };
 
     // Start refactor job execution asynchronously
-    executeRefactorJob(job, progressCallback).catch(err => {
+    // Use __dirname from context (ES module safe)
+    executeRefactorJob(job, context.__dirname, progressCallback).catch(err => {
       console.error(`[Refactor Job ${jobId}] Unhandled execution error: ${err.message}`);
     });
 

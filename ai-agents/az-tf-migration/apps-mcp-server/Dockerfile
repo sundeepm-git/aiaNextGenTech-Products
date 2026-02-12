@@ -1,97 +1,65 @@
-# Build Instructions:
-# docker build --no-cache -t aztf-mcp-server .
+# Use Azure CLI as base image (Pre-installed: Python 3, Azure CLI)
+FROM mcr.microsoft.com/azure-cli:latest
 
-# 1. Base image with Node
-FROM mcr.microsoft.com/devcontainers/javascript-node:1-22-bullseye
-
-# 2. Install System Dependencies
-RUN apt-get update && \
-    apt-get install -y wget apt-transport-https software-properties-common unzip curl gnupg lsb-release jq && \
-    # PowerShell 7
-    wget -q https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb && \
-    dpkg -i packages-microsoft-prod.deb && \
-    rm packages-microsoft-prod.deb && \
-    apt-get update && \
-    apt-get install -y powershell && \
-    # Terraform
-    wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list && \
-    apt-get update && apt-get install -y terraform && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# 2.2 Install aztfexport
-RUN export DOWNLOAD_URL=$(curl -s https://api.github.com/repos/Azure/aztfexport/releases/latest | grep "browser_download_url.*linux_amd64.zip" | cut -d '"' -f 4) && \
-    echo "Downloading from: $DOWNLOAD_URL" && \
-    curl -fL "$DOWNLOAD_URL" -o aztfexport.zip && \
-    unzip aztfexport.zip && \
-    find . -name "aztfexport*" -type f -exec chmod +x {} + && \
-    find . -name "aztfexport*" -type f -exec mv {} /usr/local/bin/aztfexport \; && \
-    rm -f aztfexport.zip
-
-# 2.5. Install Python 3
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# 2.6. Install Azure CLI
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && az --version
-
-# 3. Install Azure PowerShell Modules
-RUN pwsh -Command "Set-PSRepository -Name PSGallery -InstallationPolicy Trusted" && \
-    pwsh -Command "Install-Module -Name Az.Accounts -Force -AllowClobber -Scope AllUsers" && \
-    pwsh -Command "Install-Module -Name Az.Resources -Force -AllowClobber -Scope AllUsers"
-
-# 4. Create app directory
+# Set working directory
 WORKDIR /app
 
-# 5. Copy package files and install deps
+# 1. Install System Dependencies (Git is required for GitHub Push)
+RUN tdnf install -y \
+    wget \
+    unzip \
+    git \
+    tar \
+    gzip \
+    ca-certificates \
+    && tdnf clean all
+
+# 2. Install Python Dependencies
+# Required for the 'load_dotenv' logic in your Python script
+RUN tdnf install -y python3-pip && tdnf clean all
+RUN python3 -m pip install python-dotenv
+
+# 3. Install Node.js (Required for MCP Server)
+RUN tdnf install -y nodejs npm && \
+    node -v && npm -v
+
+# 4. Install Terraform (Required for aztfexport)
+RUN wget https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -O terraform.zip && \
+    unzip terraform.zip && \
+    mv terraform /usr/local/bin/ && \
+    chmod +x /usr/local/bin/terraform && \
+    rm terraform.zip
+
+# 5. Install aztfexport (Azure Terrafy)
+RUN wget https://github.com/Azure/aztfexport/releases/download/v0.15.0/aztfexport_v0.15.0_linux_amd64.zip -O aztfexport.zip && \
+    unzip aztfexport.zip && \
+    mv aztfexport /usr/local/bin/ && \
+    chmod +x /usr/local/bin/aztfexport && \
+    rm aztfexport.zip
+
+# 6. Copy Application Files
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts && \
-    npm cache clean --force
+RUN npm install --omit=dev
 
-# 6. Copy the rest of the app
-COPY . .
+COPY index.js .
+# Note: We do NOT copy .env into the image for security. 
+# Pass secrets as Container Environment Variables in Azure.
+COPY tools/ ./tools/
+COPY python/ ./python/
 
-# 6.1. Verify critical files and Tools
-RUN echo "=== Verifying Binaries ===" && \
-    terraform -version && \
-    aztfexport --version
+# 7. Set Permissions
+RUN chmod +x ./python/Export-Container-AzToTerraform.py && \
+    mkdir -p /app/azure-export && \
+    chmod -R 777 /app/azure-export
 
-# 6.5. Install Python dependencies
-RUN if [ -f python/requirements.txt ]; then \
-    pip3 install --no-cache-dir -r python/requirements.txt; \
-    fi
 
-# 7. Setup Writeable Directories for Terraform/aztfexport (CRITICAL FIX)
-# Terraform needs to write providers and state. /tmp is usually the only safe place in ACI/ACA.
-RUN mkdir -p /app/azure-export /app/report /tmp/tf-cache /tmp/tf-data && \
-    chmod -R 777 /app/azure-export /app/report /tmp/tf-cache /tmp/tf-data
+# 8. Environment Setup
+ENV PORT=3000
+ENV RUNNING_IN_CONTAINER=true
+ENV PYTHONUNBUFFERED=1
+ENV AZTFEXPORT_PLAIN_UI=true
 
-# 8. Expose port
-EXPOSE 8080
+EXPOSE 3000
 
-# 9. Environment Variables (CRITICAL FIXES ADDED)
-ENV PORT=8080 \
-    NODE_ENV=production \
-    # Redirect Terraform to use /tmp to avoid permission/exec errors in /app
-    TF_DATA_DIR=/tmp/tf-data \
-    TF_PLUGIN_CACHE_DIR=/tmp/tf-cache \
-    # Authentication defaults
-    ARM_CLIENT_ID="" \
-    ARM_CLIENT_SECRET="" \
-    ARM_TENANT_ID="" \
-    ARM_SUBSCRIPTION_ID="" \
-    # Standard Azure CLI vars
-    AZURE_CLIENT_ID="" \
-    AZURE_CLIENT_SECRET="" \
-    AZURE_TENANT_ID="" \
-    AZURE_SUBSCRIPTION_ID=""
-
-# 10. Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => { r.statusCode === 200 ? process.exit(0) : process.exit(1) })"
-
-# 11. Start server
+# 9. Start Server
 CMD ["node", "index.js"]
