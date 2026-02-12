@@ -15,9 +15,9 @@ RUN tdnf install -y \
     && tdnf clean all
 
 # 2. Install Python Dependencies
-# Required for the 'load_dotenv' logic in your Python script
 RUN tdnf install -y python3-pip && tdnf clean all
-RUN python3 -m pip install python-dotenv
+COPY python/requirements.txt ./python/requirements.txt
+RUN python3 -m pip install -r ./python/requirements.txt
 
 # 3. Install Node.js (Required for MCP Server)
 RUN tdnf install -y nodejs npm && \

@@ -587,7 +587,7 @@ class TerraformRefactorEngine:
         try:
             # List all blobs in the source path
             list_cmd = [
-                'az.cmd', 'storage', 'blob', 'list',
+                AZ_PATH, 'storage', 'blob', 'list',
                 '--account-name', self.storage_account,
                 '--container-name', self.source_container,
                 '--prefix', self.blob_source_path,
@@ -612,7 +612,7 @@ class TerraformRefactorEngine:
                 local_file = self.source_dir / filename
 
                 download_cmd = [
-                    'az.cmd', 'storage', 'blob', 'download',
+                    AZ_PATH, 'storage', 'blob', 'download',
                     '--account-name', self.storage_account,
                     '--container-name', self.source_container,
                     '--name', blob_name,
@@ -744,7 +744,7 @@ crash.log
         try:
             # Ensure container exists
             container_check = subprocess.run([
-                'az.cmd', 'storage', 'container', 'exists',
+                AZ_PATH, 'storage', 'container', 'exists',
                 '--account-name', self.storage_account,
                 '--name', self.output_container,
                 '--auth-mode', 'login'
@@ -756,7 +756,7 @@ crash.log
             if not container_exists:
                 self._print_step(f"Creating container: {self.output_container}", "yellow")
                 subprocess.run([
-                    'az.cmd', 'storage', 'container', 'create',
+                    AZ_PATH, 'storage', 'container', 'create',
                     '--account-name', self.storage_account,
                     '--name', self.output_container,
                     '--auth-mode', 'login'
@@ -773,7 +773,7 @@ crash.log
                 blob_name = f"{self.blob_output_path}/{relative_path}".replace('\\', '/')
                 
                 upload_cmd = [
-                    'az.cmd', 'storage', 'blob', 'upload',
+                    AZ_PATH, 'storage', 'blob', 'upload',
                     '--account-name', self.storage_account,
                     '--container-name', self.output_container,
                     '--name', blob_name,
