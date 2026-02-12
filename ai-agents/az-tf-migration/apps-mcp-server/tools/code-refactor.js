@@ -57,8 +57,9 @@ export async function executeRefactorJob(job, __dirname, progressCallback = null
     // Determine Python executable (try python3 first, fallback to python)
     const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
     
-    // Build Python arguments
+    // Build Python arguments — use -u flag for unbuffered output (real-time streaming)
     const pythonArgs = [
+      '-u',
       resolvedScript,
       job.subscriptionId,
       job.resourceGroup
@@ -78,6 +79,7 @@ export async function executeRefactorJob(job, __dirname, progressCallback = null
       const python = spawn(pythonExecutable, pythonArgs, {
         env: {
           ...process.env,
+          PYTHONUNBUFFERED: '1',
           storageAccount: env.storageAccount?.trim().replace(/\s*=\s*/g, '').trim()
         }
       });

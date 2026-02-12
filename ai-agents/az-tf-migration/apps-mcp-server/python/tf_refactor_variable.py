@@ -38,20 +38,20 @@ def ensure_azure_spn_login():
         pass
     # Not logged in or not as SPN, try SPN login
     if client_id and client_secret and tenant_id:
-        print("Logging in to Azure CLI using Service Principal...")
+        print("Logging in to Azure CLI using Service Principal...", flush=True)
         login_cmd = [
             AZ_PATH, 'login', '--service-principal',
             '-u', client_id, '-p', client_secret, '--tenant', tenant_id
         ]
         result = subprocess.run(login_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print("ERROR: Azure CLI SPN login failed:")
-            print(result.stderr)
+            print("ERROR: Azure CLI SPN login failed:", flush=True)
+            print(result.stderr, flush=True)
             sys.exit(1)
-        print("Azure CLI SPN login successful.")
+        print("Azure CLI SPN login successful.", flush=True)
     else:
-        print("ERROR: Not logged in to Azure CLI and SPN environment variables are not set.")
-        print("Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID.")
+        print("ERROR: Not logged in to Azure CLI and SPN environment variables are not set.", flush=True)
+        print("Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID.", flush=True)
         sys.exit(1)
 
 # Ensure SPN login at script start
@@ -373,7 +373,7 @@ class TerraformRefactorEngine:
             "red": "\033[91m",
             "reset": "\033[0m"
         }
-        print(f"{colors.get(color, '')}{msg}{colors['reset']}")
+        print(f"{colors.get(color, '')}{msg}{colors['reset']}", flush=True)
     def _sanitize_tf_content(self, tf_content):
         """Pre-clean invalid HCL: remove lines that are just ')' or '})', and skip arguments after a block closure until a new block starts."""
         lines = tf_content.splitlines()
@@ -512,7 +512,7 @@ class TerraformRefactorEngine:
         self.failed_resources = {}
 
     def _print_step(self, message, color="blue"):
-        """Print colored step messages."""
+        """Print colored step messages with immediate flush for container streaming."""
         colors = {
             "blue": "\033[94m",
             "green": "\033[92m",
@@ -520,7 +520,7 @@ class TerraformRefactorEngine:
             "red": "\033[91m",
             "reset": "\033[0m"
         }
-        print(f"{colors.get(color, colors['blue'])}{message}{colors['reset']}")
+        print(f"{colors.get(color, colors['blue'])}{message}{colors['reset']}", flush=True)
 
     def _download_from_github(self):
         """Download Terraform files from GitHub repository to local temp directory."""
