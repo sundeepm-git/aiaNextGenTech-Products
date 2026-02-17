@@ -34,7 +34,7 @@ if(!isStdioMode) {
     console.error(`[Environment] __dirname: ${__dirname}`);
 }
 
-import { assessmentToolDefinition, assessmentToolHandler, initializeBlobStorage, executeAssessmentJob } from './tools/assessment.js';
+import { executeAssessmentJob, assessmentToolDefinition, assessmentToolHandler } from './tools/assessment.js';
 // Import the new Python tool wrapper
 import { aztfexportTool } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
@@ -47,7 +47,8 @@ if(!isStdioMode) {
     console.error(`[Tool Import] All tools imported successfully`);
 }
 
-const blobStorageInfo = await initializeBlobStorage(isStdioMode);
+// Blob storage initialization is handled by Python. Stub for Node.js context:
+const blobStorageInfo = { available: false };
 
 // --- REPORT DIRECTORY DETECTION ---
 const reportDirCandidates = [
@@ -88,8 +89,14 @@ const toolContext = {
     // Note: Export tool handles its own jobs internally via exportJobs map in aztfexport.js
 };
 
-// 1. Register Assessment Tool
-server.tool(assessmentToolDefinition.name, assessmentToolDefinition.schema, (p) => assessmentToolHandler(p, toolContext));
+// Added the description argument and ensured we pass the correct schema object
+server.tool(
+    assessmentToolDefinition.name,
+    assessmentToolDefinition.description,
+    assessmentToolDefinition.inputSchema.shape, // .shape is required for the Inspector to see Zod fields
+    (params) => assessmentToolHandler(params, toolContext)
+);
+
 if(!isStdioMode) console.error(`[Server] ✓ Registered: ${assessmentToolDefinition.name}`);
 
 // 2. Register Export Tool (Python Version)
@@ -171,34 +178,36 @@ app.get("/jobs/:jobId", (req, res) => {
 });
 
 // Tools list endpoint for debugging
+// --- Replace your app.get("/tools", ...) with this ---
 app.get("/tools", (req, res) => {
-    const psDir = path.resolve(__dirname, 'ps');
     const pythonDir = path.resolve(__dirname, 'python');
     
+    // Safely build the tool list to avoid "undefined" property crashes
+    const toolsList = [
+        {
+            name: assessmentToolDefinition?.name || "azure_assessment",
+            description: assessmentToolDefinition?.description || "Azure Assessment Tool"
+        },
+        {
+            name: aztfexportTool?.name || "export_azure_terraform",
+            description: aztfexportTool?.description || "Terraform Export Tool"
+        },
+        {
+            name: refactorToolDefinition?.name || "refactor_terraform_code",
+            description: refactorToolDefinition?.description || "Terraform Refactor Tool"
+        }
+    ];
+
     res.status(200).json({
-        registered_tools: [
-            {
-                name: assessmentToolDefinition.name,
-                description: assessmentToolDefinition.schema.description
-            },
-            {
-                name: aztfexportTool.name, // FIXED
-                description: aztfexportTool.description // FIXED: Description is at root level now
-            },
-            {
-                name: refactorToolDefinition.name,
-                description: refactorToolDefinition.schema.description
-            }
-        ],
+        registered_tools: toolsList,
         blob_storage: blobStorageInfo ? "initialized" : "not initialized",
-        local_report_dir: localReportDir,
+        local_report_dir: localReportDir || "/app/ps/report",
         filesystem_check: {
-            ps_dir_exists: fs.existsSync(psDir),
-            ps_dir_path: psDir,
+            // FIX: Removed reference to undefined 'psDir' to stop the crash
             python_dir_exists: fs.existsSync(pythonDir),
             python_dir_path: pythonDir,
-            assessment_script_exists: fs.existsSync(path.join(psDir, 'assessment-AzSubscription.ps1')),
-            export_script_exists: fs.existsSync(path.join(psDir, 'Export-AzToTerraform.ps1')),
+            assessment_script_exists: fs.existsSync(path.join(pythonDir, 'assessment-AzSubscription.py')),
+            export_script_exists: fs.existsSync(path.join(pythonDir, 'Export-Container-AzToTerraform.py')),
             refactor_script_exists: fs.existsSync(path.join(pythonDir, 'refactor.py'))
         },
         environment: {
@@ -254,8 +263,14 @@ if (isStdioMode) {
 } else {
     // HTTP/SSE mode: used for Azure Container Apps and local web server
     console.error("[Startup Mode] HTTP/SSE mode enabled (Azure Container App or local web)");
-    app.listen(PORT, '0.0.0.0', () => {
-        console.error(`\n🚀 Azure MCP Server running on http://127.0.0.1:${PORT}`);
-        console.error(`🔗 SSE URL: http://127.0.0.1:${PORT}/sse`);
-    });
+    // Detect public hostname: Azure Container Apps sets CONTAINER_APP_HOSTNAME automatically
+    const containerHost = process.env.CONTAINER_APP_HOSTNAME || process.env.PUBLIC_HOST || process.env.WEBSITE_HOSTNAME;
+    if (containerHost) {
+        console.error(`\n🚀 Azure MCP Server running on https://${containerHost}`);
+        console.error(`🔗 SSE URL: https://${containerHost}/sse`);
+    } else {
+        console.error(`\n🚀 Azure MCP Server running on http://localhost:${PORT}`);
+        console.error(`🔗 SSE URL: http://localhost:${PORT}/sse`);
+    }
+    app.listen(PORT, '0.0.0.0');
 }

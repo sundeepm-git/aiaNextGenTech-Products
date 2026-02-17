@@ -249,11 +249,15 @@ export async function refactorToolHandler({ subscriptionId, resourceGroup, refac
       console.error(`[Refactor Job ${jobId}] Unhandled execution error: ${err.message}`);
     });
 
-    const host = process.env.PUBLIC_HOST || process.env.WEBSITE_HOSTNAME || 'localhost';
-    const port = process.env.PORT || 8080;
-    const protocol = process.env.PUBLIC_PROTOCOL || (host === 'localhost' ? 'http' : 'https');
-    const portSuffix = (host === 'localhost' || host.includes('azurewebsites.net')) ? `:${port}` : '';
-    const statusUrl = `${protocol}://${host}${portSuffix}/jobs/${jobId}`;
+    // Detect public hostname: Azure Container Apps sets CONTAINER_APP_HOSTNAME automatically
+    const host = process.env.CONTAINER_APP_HOSTNAME || process.env.PUBLIC_HOST || process.env.WEBSITE_HOSTNAME || '';
+    const port = process.env.PORT || 3000;
+    let statusUrl;
+    if (host) {
+        statusUrl = `https://${host}/jobs/${jobId}`;
+    } else {
+        statusUrl = `http://localhost:${port}/jobs/${jobId}`;
+    }
 
     const enabledOptions = Object.entries(job.refactorOptions)
       .filter(([_, enabled]) => enabled)

@@ -1,4 +1,5 @@
 
+
 import sys
 import os
 import re
@@ -12,6 +13,15 @@ from tf_writer import TerraformWriters
 from tf_backup import BackupManager
 from tf_validation import TerraformValidator
 
+# --- Set AZ_PATH globally so it is available everywhere ---
+import platform
+AZ_PATH = os.getenv('AZ_CLI_PATH')
+if not AZ_PATH:
+    if platform.system() == 'Windows':
+        AZ_PATH = r'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
+    else:
+        AZ_PATH = 'az'
+
 # --- Always login with SPN if env vars are set ---
 def ensure_azure_spn_login():
     import subprocess, os, json, platform
@@ -20,13 +30,7 @@ def ensure_azure_spn_login():
     client_id = os.environ.get('AZURE_CLIENT_ID')
     client_secret = os.environ.get('AZURE_CLIENT_SECRET')
     tenant_id = os.environ.get('AZURE_TENANT_ID')
-    # Prefer AZ_CLI_PATH from environment or .env, fallback to platform default
-    AZ_PATH = os.getenv('AZ_CLI_PATH')
-    if not AZ_PATH:
-        if platform.system() == 'Windows':
-            AZ_PATH = r'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
-        else:
-            AZ_PATH = 'az'
+    # AZ_PATH is now set globally
     # Check if already logged in
     try:
         result = subprocess.run([AZ_PATH, 'account', 'show', '--output', 'json'], capture_output=True, text=True, check=True)
@@ -596,8 +600,12 @@ class TerraformRefactorEngine:
                 '--output', 'json'
             ]
             
-            result = subprocess.run(list_cmd, capture_output=True, text=True, check=True, shell=True)
+            result = subprocess.run(list_cmd, capture_output=True, text=True, check=True)
             import json
+            if result.stderr:
+                self._print_step(f"  az CLI stderr: {result.stderr.strip()}", "yellow")
+            if not result.stdout or not result.stdout.strip():
+                raise Exception(f"az storage blob list returned empty output. stderr: {result.stderr}")
             blob_names = json.loads(result.stdout)
             
             if not blob_names:
@@ -620,7 +628,7 @@ class TerraformRefactorEngine:
                     '--auth-mode', 'login'
                 ]
 
-                subprocess.run(download_cmd, capture_output=True, check=True, shell=True)
+                subprocess.run(download_cmd, capture_output=True, check=True)
                 self._print_step(f"  Downloaded: {filename}", "green")
 
             self._print_step(f"Successfully downloaded all files", "green")
@@ -748,10 +756,14 @@ crash.log
                 '--account-name', self.storage_account,
                 '--name', self.output_container,
                 '--auth-mode', 'login'
-            ], capture_output=True, text=True, shell=True)
+            ], capture_output=True, text=True)
             
             import json
-            container_exists = json.loads(container_check.stdout).get('exists', False)
+            if not container_check.stdout or not container_check.stdout.strip():
+                self._print_step(f"  Container check returned empty. stderr: {container_check.stderr}", "yellow")
+                container_exists = False
+            else:
+                container_exists = json.loads(container_check.stdout).get('exists', False)
             
             if not container_exists:
                 self._print_step(f"Creating container: {self.output_container}", "yellow")
@@ -760,7 +772,7 @@ crash.log
                     '--account-name', self.storage_account,
                     '--name', self.output_container,
                     '--auth-mode', 'login'
-                ], check=True, shell=True)
+                ], check=True)
             
             # Upload all files from output directory
             files_to_upload = list(self.output_dir.glob('**/*'))
@@ -782,7 +794,7 @@ crash.log
                     '--overwrite', 'true'
                 ]
                 
-                subprocess.run(upload_cmd, capture_output=True, check=True, shell=True)
+                subprocess.run(upload_cmd, capture_output=True, check=True)
                 self._print_step(f"  Uploaded: {relative_path}", "green")
             
             storage_url = f"https://{self.storage_account}.blob.core.windows.net/{self.output_container}/{self.blob_output_path}/"

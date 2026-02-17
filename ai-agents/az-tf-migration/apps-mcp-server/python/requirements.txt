@@ -1,3 +1,10 @@
+jinja2
+azure-storage-blob
+# Azure SDK dependencies for assessment tool
+azure-identity
+azure-mgmt-resource
+azure-mgmt-subscription
+azure-storage-blob
 # Requirements for Azure-to-Terraform Refactor Engine
 
 # External dependencies

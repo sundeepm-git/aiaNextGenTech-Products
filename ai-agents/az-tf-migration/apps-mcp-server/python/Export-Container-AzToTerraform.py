@@ -1,3 +1,4 @@
+
 import os
 import sys
 import subprocess
@@ -313,6 +314,7 @@ def main():
 
     for idx, res in enumerate(to_export):
         print(f"\n[{idx+1}/{len(to_export)}] Exporting: {res['name']}")
+        sys.stdout.flush()
         sandbox = export_dir / f"sb_{idx}"
         cmd = ["aztfexport", "resource", "--name", re.sub(r'[^a-zA-Z0-9_]', '_', res['name']), "--subscription-id", args.subscription_id, "--non-interactive", "--output-dir", str(sandbox), "--overwrite", res['id']]
         ret, _ = run_streaming_shell(cmd)
@@ -337,9 +339,13 @@ def main():
     
     # 5. Success Message & Uploads
     print("\n" + "="*50)
+    sys.stdout.flush()
     print(f"SUCCESS: Export completed for Resource Group: {args.resource_group}")
+    sys.stdout.flush()
     print(f"Managed Resources: {len(resources_exported)} | Data References: {len(to_data)}")
+    sys.stdout.flush()
     print("="*50 + "\n")
+    sys.stdout.flush()
 
     upload_and_push(export_dir, args.subscription_id, args.resource_group)
     print(f"\nFINAL_RESULT_PATH::{export_dir}")

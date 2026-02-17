@@ -62,8 +62,8 @@ param (
     [Parameter(Mandatory=$false)]
     [string]$ClientId,
     
-    [Parameter(Mandatory=$false)]
-    [string]$ClientSecret,
+    #[Parameter(Mandatory=$false)]
+    #[string]$ClientSecret,*/
     
     [Parameter(Mandatory=$false)]
     [string]$Location = "centralus",
@@ -533,10 +533,16 @@ if ($ClientId) {
     $envVars += "ARM_CLIENT_ID=$ClientId"           # ADD THIS
 }
 
-if ($ClientSecret) {
-    $envVars += "AZURE_CLIENT_SECRET=$ClientSecret"
-    $envVars += "ARM_CLIENT_SECRET=$ClientSecret"   # ADD THIS
-}
+#if ($ClientSecret) {
+    #$envVars += "AZURE_CLIENT_SECRET=$ClientSecret"
+    #$envVars += "ARM_CLIENT_SECRET=$ClientSecret"   # ADD THIS
+#}
+
+# NEW CODE
+# We point the env var to the secret name we defined in Step 1
+# Syntax is: EnvVarName=secretref:secret-name-in-aca
+$envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
+$envVars += "ARM_CLIENT_SECRET=secretref:azure-client-secret"
 
 Write-Info "Configured environment variables:"
 foreach ($envVar in $envVars) {

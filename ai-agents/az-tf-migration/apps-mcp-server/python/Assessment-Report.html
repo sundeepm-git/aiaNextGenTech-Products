@@ -1,0 +1,48 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Azure Assessment Report</title>
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; background: #F5F5F5; padding: 20px; }
+            .container { max-width: 1200px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+            .header { background: #4472C4; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .section-title { font-size: 20px; font-weight: bold; margin-top: 30px; border-left: 5px solid #4472C4; padding-left: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+            th { background: #f8f9fa; }
+            .stat-card { display: inline-block; padding: 20px; background: #eee; margin-right: 10px; border-radius: 5px; text-align: center; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Azure Assessment Report</h1>
+                <p>Subscription: d0f1884d-1f98-4bf1-9e15-e2986fc1bca2</p>
+            </div>
+            <div class="section-title">Assessment Summary</div>
+            <div class="stat-card"><h3>5</h3><p>Total</p></div>
+            <div class="stat-card"><h3>5</h3><p>Managed</p></div>
+            
+            <div class="section-title">Resources</div>
+            <table>
+                <thead><tr><th>Name</th><th>Type</th><th>Group</th></tr></thead>
+                <tbody>
+                    
+                    <tr><td>samcpstorage</td><td>Microsoft.Storage/storageAccounts</td><td>rg-mcp-servers\</td></tr>
+                    
+                    <tr><td>workspace-rgmcpserversIh7a</td><td>Microsoft.OperationalInsights/workspaces</td><td>rg-mcp-servers\</td></tr>
+                    
+                    <tr><td>aztfmcpacr</td><td>Microsoft.ContainerRegistry/registries</td><td>rg-mcp-servers\</td></tr>
+                    
+                    <tr><td>mcp-aca-env</td><td>Microsoft.App/managedEnvironments</td><td>rg-mcp-servers\</td></tr>
+                    
+                    <tr><td>aztf-mcp-app</td><td>Microsoft.App/containerApps</td><td>rg-mcp-servers\</td></tr>
+                    
+                </tbody>
+            </table>
+        </div>
+    </body>
+    </html>
+    
