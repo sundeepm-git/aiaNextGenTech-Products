@@ -40,7 +40,7 @@
     Keep old revisions instead of deactivating them
 
 .EXAMPLE
-    .\deploy.ps1 -SubscriptionId "your-sub-id" -TenantId "your-tenant-id" -ClientId "your-client-id" -ClientSecret "your-secret"
+    .\deploy.ps1 -SubscriptionId "your-sub-id" -TenantId "your-tenant-id" -ClientId "your-client-id"
 #>
 
 param (
@@ -62,8 +62,8 @@ param (
     [Parameter(Mandatory=$false)]
     [string]$ClientId,
     
-    #[Parameter(Mandatory=$false)]
-    #[string]$ClientSecret,*/
+    [Parameter(Mandatory=$false)]
+    [string]$ClientSecret,
     
     [Parameter(Mandatory=$false)]
     [string]$Location = "centralus",
@@ -209,6 +209,32 @@ if (-not $AcrName) {
 }
 
 Write-Host "DEBUG: Using ACR: $AcrName"
+
+# ===========================
+# LOAD .ENV VARIABLES
+# ===========================
+if (Test-Path ".env") {
+    Write-Info "Found .env file. Loading variables..."
+    foreach ($line in Get-Content ".env") {
+        # Skip comments and empty lines
+        if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
+        
+        # Split on the first equals sign
+        $parts = $line -split '=', 2
+        if ($parts.Count -eq 2) {
+            $envName = $parts[0].Trim()
+            $envValue = $parts[1].Trim().Trim('"', "'") # Remove extra spaces or quotes
+            
+            # Assign to $ClientSecret if it's found in the .env file
+            if ($envName -eq "AZURE_CLIENT_SECRET" -and [string]::IsNullOrEmpty($ClientSecret)) {
+                $ClientSecret = $envValue
+                Write-Info "Successfully loaded AZURE_CLIENT_SECRET from .env file"
+            }
+        }
+    }
+} else {
+    Write-Info "No .env file found. Relying on script parameters."
+}
 
 # ===========================
 # START DEPLOYMENT
@@ -517,32 +543,27 @@ if ($ContainerName) {
     $envVars += "AZURE_STORAGE_CONTAINER=$ContainerName"
 }
 
-# Add SPN credentials if provided (REQUIRED for automation)
+# Add SPN credentials if provided
 if ($SubscriptionId) {
     $envVars += "AZURE_SUBSCRIPTION_ID=$SubscriptionId"
-    $envVars += "ARM_SUBSCRIPTION_ID=$SubscriptionId" # ADD THIS
+    $envVars += "ARM_SUBSCRIPTION_ID=$SubscriptionId"
 }
 
 if ($TenantId) {
     $envVars += "AZURE_TENANT_ID=$TenantId"
-    $envVars += "ARM_TENANT_ID=$TenantId"           # ADD THIS
+    $envVars += "ARM_TENANT_ID=$TenantId"
 }
 
 if ($ClientId) {
     $envVars += "AZURE_CLIENT_ID=$ClientId"
-    $envVars += "ARM_CLIENT_ID=$ClientId"           # ADD THIS
+    $envVars += "ARM_CLIENT_ID=$ClientId"
 }
 
-#if ($ClientSecret) {
-    #$envVars += "AZURE_CLIENT_SECRET=$ClientSecret"
-    #$envVars += "ARM_CLIENT_SECRET=$ClientSecret"   # ADD THIS
-#}
-
-# NEW CODE
-# We point the env var to the secret name we defined in Step 1
-# Syntax is: EnvVarName=secretref:secret-name-in-aca
-$envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
-$envVars += "ARM_CLIENT_SECRET=secretref:azure-client-secret"
+# Only map the secret to environment variables if the secret was found
+if ($ClientSecret) {
+    $envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
+    $envVars += "ARM_CLIENT_SECRET=secretref:azure-client-secret"
+}
 
 Write-Info "Configured environment variables:"
 foreach ($envVar in $envVars) {
@@ -557,7 +578,7 @@ foreach ($envVar in $envVars) {
 if ($appExists) {
     Write-Info "Updating existing container app..."
     
-    # Set registry credentials FIRST (before update attempts to pull image)
+    # Set registry credentials FIRST
     Write-Info "Updating registry credentials..."
     az containerapp registry set `
         --name $ContainerAppName `
@@ -571,7 +592,7 @@ if ($appExists) {
         Write-Fail "Failed to set registry credentials"
         exit 1
     }
-    
+
     # Build the az command with environment variables as separate arguments
     $azArgs = @(
         'containerapp', 'update',
@@ -589,6 +610,12 @@ if ($appExists) {
     # Add each environment variable as a separate argument
     foreach ($envVar in $envVars) {
         $azArgs += $envVar
+    }
+    
+    # Add the secret during the update if it exists
+    if ($ClientSecret) {
+        $azArgs += '--set-secrets'
+        $azArgs += "azure-client-secret=$ClientSecret"
     }
     
     $azArgs += '--output'
@@ -618,15 +645,21 @@ if ($appExists) {
         '--system-assigned',
         '--env-vars'
     )
-    
+
     # Add each environment variable as a separate argument
     foreach ($envVar in $envVars) {
         $azArgs += $envVar
     }
-    
+
+    # Add the secret at creation time if it exists
+    if ($ClientSecret) {
+        $azArgs += '--secrets'
+        $azArgs += "azure-client-secret=$ClientSecret"
+    }
+
     $azArgs += '--output'
     $azArgs += 'none'
-    
+
     # Execute the command
     & az @azArgs
 }

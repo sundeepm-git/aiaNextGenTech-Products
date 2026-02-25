@@ -7,9 +7,8 @@ import shutil
 from dotenv import load_dotenv
 from azure.identity import ClientSecretCredential
 
-
 from azure.mgmt.resource import ResourceManagementClient
-from datetime import datetime
+from datetime import datetime, timezone
 
 # List of Azure resource types to be classified as 'Reference' (excluded from 'Managed')
 EXCLUDED_AZURE_TYPES = [
@@ -269,7 +268,7 @@ def main():
     AZ_CLI = os.getenv("AZ_CLI_PATH") or shutil.which("az") or shutil.which("az.cmd")
 
     # 1. Start Progress message
-    print("PROGRESS: Starting SPN authentication...")
+    print("PROGRESS: Starting SPN authentication...", file=sys.stderr)
 
     if not all([client_id, client_secret, tenant_id]):
         print("ERROR: Missing required SPN environment variables (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID). Local login is not supported.")
@@ -289,7 +288,7 @@ def main():
         )
         
         # 2. Authentication Success message
-        print("SPN authentication done.")
+        print("SPN authentication done.", file=sys.stderr)
 
     except subprocess.CalledProcessError as e:
         print(f"ERROR: SPN authentication failed. {e.stderr}")
@@ -319,24 +318,22 @@ def main():
             "items": [{**r, "status": "Managed"} for r in managed] + [{**r, "status": "Reference"} for r in reference]
         }
 
+
         html_report = generate_report_html(report_data)
         report_filename = "Assessment-Report-Latest.html"
-        
-        # Save locally first
         with open(report_filename, "w", encoding="utf-8") as f:
             f.write(html_report)
 
-        # 4. Storage Upload
         storage_account = os.getenv("storageAccount")
         container_name = os.getenv("containerName", "assessment-reports")
+        stdout_msgs = []
+        stderr_msgs = []
+        started_at = datetime.now(timezone.utc).isoformat()
+        completed_at = None
 
         if storage_account:
             blob_path = f"{subscription_id}/{report_filename}"
-            
-            # Create container (silently)
             subprocess.run([AZ_CLI, "storage", "container", "create", "--account-name", storage_account, "--name", container_name, "--auth-mode", "login"], capture_output=True)
-            
-            # Upload blob (silently)
             upload_res = subprocess.run([
                 AZ_CLI, "storage", "blob", "upload",
                 "--account-name", storage_account,
@@ -346,14 +343,26 @@ def main():
                 "--overwrite", "true",
                 "--auth-mode", "login"
             ], capture_output=True, text=True)
-
             if upload_res.returncode == 0:
-                # 5. Last message once successfully uploaded
-                print(f"SUCCESS: HTML report successfully uploaded in storage account '{storage_account}'.")
+                stdout_msgs.append(f"SUCCESS: HTML report successfully uploaded in storage account '{storage_account}'.")
             else:
-                print("ERROR: Storage upload failed.")
+                stderr_msgs.append("ERROR: Storage upload failed.")
         else:
-            print("SUCCESS: Local report generated (storageAccount environment variable not set).")
+            stdout_msgs.append("SUCCESS: Local report generated (storageAccount environment variable not set).")
+
+        completed_at = datetime.now(timezone.utc).isoformat()
+        import uuid
+        import json
+        response = {
+            "jobId": str(uuid.uuid4()),
+            "subscriptionId": subscription_id,
+            "resourceGroup": os.getenv("resourceGroup", "rg-mcp-servers"),
+            "status": "completed",
+            "storageAccount": storage_account or "unknown",
+            "startedAt": started_at,
+            "completedAt": completed_at
+        }
+        print(json.dumps(response, indent=2))
 
     except Exception as e:
         print(f"ERROR: Assessment process failed: {str(e)}")

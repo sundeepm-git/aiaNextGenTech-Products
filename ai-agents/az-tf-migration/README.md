@@ -1,16 +1,72 @@
-# Azure Terraform Migration & MCP Server
-
-**Version:** 2.0.1  
-**Runtime:** Node.js, PowerShell, Python  
-**Protocol:** Model Context Protocol (MCP)
-
-This is a production-grade, modular MCP server designed to orchestrate the migration of Azure resources to Terraform. it uses a chain of AI agents and specialized tools to assess, export, and refactor infrastructure code.
-
-This README consolidates all project documentation into a single source of truth.
-
 ---
 
-## 📚 Table of Contents
+## 🔑 Agent Workflow, Deployment, and Secret Management (2024 Update)
+
+### Agent Workflow
+
+1. **Assessment Agent**: Scans Azure resources and generates a detailed assessment report (JSON/YAML). Implemented in `assessment.py` and invoked by the Node.js MCP server.
+2. **Export Agent**: Converts the assessment output into Terraform code using `Export-Container-AzToTerraform.py` (Python) and PowerShell wrappers. Handles authentication and uploads results to Azure Blob or GitHub.
+3. **Refactor Agent**: Optimizes and enforces standards on exported Terraform code using `code-refactor.py` and `tf_refactor_variable.py`.
+4. **Deployment**: The orchestrator (Node.js/PowerShell) deploys the generated code to the target environment.
+
+### Python Code Implementation
+
+- `assessment.py`: Performs Azure resource assessment and outputs a report.
+- `Export-Container-AzToTerraform.py`: Exports resources to Terraform HCL and tfstate.
+- `code-refactor.py`: Refactors Terraform code for best practices and compliance.
+
+All scripts are orchestrated by the Node.js server and PowerShell scripts, with configuration via `.env`.
+
+### Deployment Steps
+
+1. **Prepare Environment**: Ensure Azure CLI, Docker, and required permissions are available. Populate `.env` with all required values (see below).
+2. **Run Deployment Script**: Execute `./apps-mcp-server/deploy.ps1` to build, push, and deploy the container app. The script:
+  - Builds the Docker image with all agent scripts
+  - Pushes the image to Azure Container Registry (ACR)
+  - Deploys or updates the Azure Container App
+  - Configures environment variables and secrets
+3. **Wait for Readiness**: The script waits for the container app to become ready and outputs the public FQDN.
+4. **Check Logs**: Use `az containerapp logs show --name <app-name> --resource-group <rg> --follow` to view logs.
+
+### Secret Management
+
+- **Client secrets** (e.g., `AZURE_CLIENT_SECRET`) are securely managed using Azure Container App secrets.
+- The deployment script adds the client secret as a secret named `azure-client-secret` using `--secrets` (on create) or `--set-secrets` (on update).
+- Environment variables such as `AZURE_CLIENT_SECRET` and `ARM_CLIENT_SECRET` are mapped to `secretref:azure-client-secret`.
+- Secrets are never exposed in logs or code. The script ensures all sensitive values are referenced via `secretref`.
+
+**Example (from deploy.ps1):**
+
+```powershell
+$envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
+$azArgs += '--secrets'
+$azArgs += "azure-client-secret=$ClientSecret"
+```
+
+### .env File Example
+
+```
+RESOURCE_GROUP=your-rg
+ACR_NAME=youracr
+CONTAINER_APP_ENV=your-env
+CONTAINER_APP_NAME=your-app
+LOG_ANALYTICS_WORKSPACE=your-law
+SUBSCRIPTION_ID=xxxx-xxxx-xxxx-xxxx
+TENANT_ID=xxxx-xxxx-xxxx-xxxx
+CLIENT_ID=xxxx-xxxx-xxxx-xxxx
+CLIENT_SECRET=your-client-secret
+STORAGE_ACCOUNT=yourstorage
+STORAGE_CONTAINER=yourcontainer
+```
+
+### Troubleshooting
+
+- Ensure all required secrets and environment variables are set in `.env`.
+- If you see `SecretRef 'azure-client-secret' not found`, ensure the secret is set at creation or update time (the script handles this automatically).
+- Use the provided log commands to debug deployment issues.
+
+---
+# 📚 Table of Contents
 1. [System Architecture](#1-system-architecture)
 2. [Agents & Workflow Details](#2-agents--workflow-details)
 3. [Configuration & Output Destinations](#3-configuration--output-destinations)
@@ -20,6 +76,18 @@ This README consolidates all project documentation into a single source of truth
 7. [Deployment Guide](#7-deployment-guide)
 8. [Development & Modularization](#8-development--modularization)
 9. [Troubleshooting & Fixes](#9-troubleshooting--fixes)
+
+---
+
+# Azure Terraform Migration & MCP Server
+
+**Version:** 2.0.1  
+**Runtime:** Node.js, PowerShell, Python  
+**Protocol:** Model Context Protocol (MCP)
+
+This is a production-grade, modular MCP server designed to orchestrate the migration of Azure resources to Terraform. it uses a chain of AI agents and specialized tools to assess, export, and refactor infrastructure code.
+
+This README consolidates all project documentation into a single source of truth.
 
 ---
 
@@ -314,22 +382,20 @@ The included `deploy.ps1` script provides end-to-end automation for deploying th
 | `SkipBuild` | switch | `false` | Skip Docker build step (deploy only). |
 | `SkipTests` | switch | `false` | Skip post-deployment verification tests. |
 
-**Example:**
+**Script to RUN:**
 ```powershell
-.\apps-mcp-server\deploy.ps1 `
-  -ResourceGroup "rg-mcp-servers" `
-  -Location "eastus" `
-  -AcrName "aztfmcpacr" `
-  -SubscriptionId "YOUR-SUB-ID" `
-  -ContainerAppEnv "mcp-aca-env" `
-  -ContainerAppName "aztf-mcp-app" `
-  -LogAnalyticsWorkspace "workspace-name" `
-  -Port 8080 `
-  -Cpu "1.0" `
-  -Memory "2.0Gi" `
-  -MinReplicas 1 `
-  -MaxReplicas 3
+ .\deploy.ps1 -ResourceGroupName "rg-mcp-servers" -SubscriptionId "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2" -TenantId "a0e1f124-d84e-4ef7-bf4b-926b60443fb9" -ClientId "4a7f6b45-8322-4cfe-bd16-008afdcc1221" -StorageAccountName "samcpstorage" -ContainerName "aztfexport" -ContainerAppName "aztf-mcp-app" -LogAnalyticsWorkspace "workspace-rgmcpserversIh7a" -AcrName "aztfmcpacr" -ImageTag "v2.3" -Port 3000 -MinReplicas 0 -MaxReplicas 1 -Cpu 0.25 -Memory "0.5Gi" -NoCache
 ```
+
+### Update Secret
+Go to the container app and update the secret their copy from .env file and update
+
+## Command for MCP Inspector
+npx @modelcontextprotocol/inspector
+
+## Command to STOP the port-MCP
+netstat -ano | findstr :6274
+taskkill /PID 18568 /F
 
 ### Local Development Runner (`mcpserver-run.ps1`)
 
@@ -476,6 +542,11 @@ az containerapp logs show --name aztf-mcp-app --resource-group rg-mcp-servers --
 # Local
 # Output appears in terminal where node index.js is running
 ```
+
+### Foundry References 
+JSON RESPONSE - https://github.com/microsoft/agent-framework/blob/main/workflow-samples/CustomerSupport.yaml#L29
+https://learn.microsoft.com/en-us/power-platform/power-fx/working-with-json
+https://github.com/orgs/microsoft-foundry/discussions/218
 
 ---
 **Maintainer**: Sundeep K Maheshwari  

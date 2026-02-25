@@ -1,9 +1,12 @@
+
 import { z } from "zod";
 import { v4 as uuidv4 } from 'uuid';
 import { spawn } from 'child_process';
 import path from "path";
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import dotenv from 'dotenv';
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 export class AssessmentJob {
   constructor(id, subscriptionId, resourceGroup = null) {
@@ -34,12 +37,48 @@ export async function assessmentToolHandler(params, toolContext) {
   toolContext.jobs.set(job.id, job);
   await toolContext.executeJob(job);
   console.error(`[AssessmentToolHandler] Job created:`, job);
-  return {
-    content: [{ 
-      type: "text", 
-      text: `🚀 Assessment job started!\n\nJob ID: ${jobId}\nSubscription: ${params.subscriptionId}\n\nStatus: ${job.status}\n\nCheck the status at /jobs/${jobId}` 
-    }]
-  };
+
+  // Only change: return JSON schema as required by Microsoft Foundry
+    let resultData;
+    if (job.status === 'completed') {
+      try {
+        // Parse the perfect JSON straight from the Python script's stdout
+        resultData = JSON.parse(job.stdout);
+      } catch (err) {
+        console.error("[AssessmentToolHandler] Failed to parse Python stdout:", job.stdout);
+        resultData = { error: "Failed to parse valid JSON from Python script." };
+      }
+    } else {
+      // Provide a fallback that still matches the schema if the job fails
+      resultData = {
+        jobId: job.id,
+        subscriptionId: job.subscriptionId,
+        resourceGroup: job.resourceGroup || "rg-mcp-servers",
+        status: "failed",
+        storageAccount: "unknown",
+        startedAt: job.startedAt,
+        completedAt: new Date().toISOString()
+      };
+    }
+
+    // MCP strict wrapper: always return stringified JSON in content array
+    // MCP strict wrapper: always return stringified JSON in content array
+    // Return the resultData directly as an object within the content array
+    // This allows Microsoft Foundry to recognize it as an 'Object' type
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(resultData, null, 2) // Keep this for logs/debugging
+        }
+      ],
+      // We add the raw data as a property that Foundry can map to 'Object'
+      data:{
+       result: resultData 
+      }
+      
+    };
+     
 }
 
 export async function executeAssessmentJob(job, localReportDir, serverDir) {

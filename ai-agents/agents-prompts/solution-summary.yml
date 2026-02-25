@@ -1,0 +1,64 @@
+Create a modern, visually clear architecture diagram for an implemented Agentic AI solution that migrates Azure resources into Terraform using LLM-driven agents and MCP tools. Use Azure-blue, rounded-card components, clean spacing, and directional arrows to show data flow.
+
+Title: “Agentic AI Architecture for Azure → Terraform Migration (Implemented System)”
+
+Include and visually group the following components:
+
+=== Agentic AI Layer (Top Layer) ===
+- LLM (central reasoning engine)
+- Orchestrator Agent
+- Assessment Agent
+- Export Agent
+- Code Refactor Agent
+
+Show that:
+- Orchestrator initiates the workflow.
+- Orchestrator sends subscriptionId + resourceGroupName + NLP context to Assessment Agent.
+- Orchestrator calls Export Agent after assessment.
+- Orchestrator calls Code Refactor Agent after export.
+- Orchestrator returns final results to the user.
+
+=== MCP Tooling Layer (Middle Layer) ===
+MCP Server (Azure Container App) hosting 3 MCP tools:
+- azure_assessment
+- export_azure_terraform
+- refactor_terraform_code
+
+Show flows:
+- Assessment Agent → MCP Server → azure_assessment
+- Export Agent → MCP Server → export_azure_terraform
+- Code Refactor Agent → MCP Server → refactor_terraform_code
+
+=== Azure Platform Layer (Bottom Layer) ===
+- Azure Subscription
+- Resource Group (target for migration)
+- Azure Storage Account with containers:
+  - assessment-reports/
+  - export-reports/
+  - terraform-raw/
+  - terraform-refactored/
+
+=== Data Flows to Visualize ===
+1. Assessment Flow:
+   Orchestrator → Assessment Agent → MCP Server → azure_assessment → Azure Subscription/Resource Group
+   Output: HTML assessment report → Storage (assessment-reports/)
+
+2. Export Flow:
+   Orchestrator → Export Agent → MCP Server → export_azure_terraform → Azure Subscription/Resource Group
+   Output: main.tf, provider.tf, data-block.tf, terraform.tfstate, HTML export report → Storage (terraform-raw/ + export-reports/)
+
+3. Refactor Flow:
+   Orchestrator → Code Refactor Agent → Storage (terraform-raw/) → MCP Server → refactor_terraform_code
+   Output: Refactored Terraform files → Storage (terraform-refactored/)
+
+=== Visual Requirements ===
+- Use Azure icons for Azure services.
+- Use rounded cards for agents and MCP tools.
+- Use a hub-and-spoke or layered layout.
+- Use directional arrows to show workflow sequencing.
+- Label all artifacts (HTML reports, .tf files, .tfstate).
+- Highlight the three MCP tools distinctly.
+- Make the diagram clean, modern, and presentation-ready.
+
+Output:
+A single, complete architecture diagram visually representing the implemented system.
