@@ -302,75 +302,272 @@ For all automation, CI/CD, and production scenarios, you **must** use a Service 
 
 ### Server Modes
 
-#### Mode 1: Stdio (Recommended for Claude/Clients)
-Add to your `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "azure-terraform": {
-      "command": "node",
-      "args": ["C:/path/to/apps-mcp-server/index.js", "--stdio"],
-      "env": {
-        "storageAccount": "samcpstorage",
-        "GITHUB_TOKEN": "your-token"
-      }
-    }
-  }
-}
+
+## 4. API - Expose Azure Foundry Workflow as API (Implementation Pending)
+
+The sequential Azure Foundry workflow (`aztf-sequential-wf.py`) is exposed as a REST API using **FastAPI**, allowing the `ai-aztfexport-ui` frontend to trigger migration workflows via NLP prompts. Workflow state is tracked **in-memory** during execution — no external storage account or database is required for state management.
+
+### Architecture
+
+```
+┌──────────────────────────┐       POST /api/v1/workflow/trigger        ┌──────────────────────────────┐
+│   ai-aztfexport-ui       │ ─────────────────────────────────────────► │  FastAPI  (api/app.py)       │
+│   (Next.js / React)      │ ◄──── { workflowId, status: "queued" } ── │  Port 8000                   │
+│                          │                                            └──────────┬───────────────────┘
+│  - User types NLP prompt │       GET /api/v1/workflow/{id}                       │
+│  - Polls workflow status │ ─────────────────────────────────────────►            │
+│  - Displays results      │ ◄──── { status, steps, results }                     │
+└──────────────────────────┘                                            ┌──────────▼───────────────────┐
+                                                                        │  Background Task             │
+                                                                        │  workflow_runner.py           │
+                                                                        │  ┌────────────────────────┐  │
+                                                                        │  │ aztf-sequential-wf.py  │  │
+                                                                        │  │ (existing pipeline)     │  │
+                                                                        │  └────────────────────────┘  │
+                                                                        └──────────┬───────────────────┘
+                                                                                   │ update state
+                                                                        ┌──────────▼───────────────────┐
+                                                                        │  In-Memory State Store       │
+                                                                        │  Dict[workflowId, state]     │
+                                                                        │  Thread-safe (asyncio.Lock)  │
+                                                                        │  Cleared on process restart  │
+                                                                        └──────────────────────────────┘
 ```
 
-#### Mode 2: HTTP/SSE (For Debugging/Inspector)
-Start the server:
-```bash
-cd apps-mcp-server
-npm install
-npm start
-# Server runs on port 8080
+> **Note:** Workflow state lives in the FastAPI process memory. It is available for the lifetime of the server. If the process restarts, in-flight workflow history is lost. For production persistence, plug in Cosmos DB or any external store later.
+
+### API Directory Structure
+
+All API code lives inside the existing `apps-mcp-server/python/` folder:
+
 ```
-
----
-
-## 5. Real-Time Progress Streaming
-
-The server supports real-time progress streaming for jobs using Server-Sent Events (SSE).
+apps-mcp-server/python/
+├── az-fndry-workflow/              # Existing (unchanged)
+│   ├── aztf-sequential-wf.py      #   Sequential pipeline
+│   └── agent-prompts.yaml         #   Agent prompt definitions
+├── api/                            # NEW — FastAPI application
+│   ├── app.py                     #   Entry point, CORS, route registration
+│   ├── routes/
+│   │   ├── workflow.py            #   POST trigger, GET status, GET list
+│   │   └── health.py             #   GET /health
+│   ├── models/
+│   │   ├── request.py            #   WorkflowRequest pydantic model
+│   │   └── response.py           #   WorkflowResponse, WorkflowStatus
+│   ├── services/
+│   │   ├── nlp_parser.py         #   Extract sub/rg from NLP prompt
+│   │   ├── state_store.py        #   In-memory workflow state store
+│   │   └── workflow_runner.py    #   Background execution wrapper
+│   └── config/
+│       └── settings.py           #   Centralized env configuration
+├── .env                           # Environment variables
+├── requirements.txt               # Updated with FastAPI, uvicorn, pydantic
+└── Dockerfile                     # Python API container
+```
 
 ### API Endpoints
 
-#### 1. Start Job
-**POST** `/messages`
-```json
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/workflow/trigger` | Trigger workflow from NLP prompt (async, returns immediately) |
+| `GET`  | `/api/v1/workflow/{workflowId}` | Get workflow status (in-memory lookup) |
+| `GET`  | `/api/v1/workflows?userId=&limit=20` | List user workflows (filtered from memory) |
+| `GET`  | `/health` | Health check with uptime and active workflow count |
+
+### Request / Response Examples
+
+**Trigger Workflow:**
+```bash
+POST /api/v1/workflow/trigger
+Content-Type: application/json
+
 {
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "export_azure_to_terraform",
-    "arguments": {
-      "subscriptionId": "d0f1884d-...",
-      "resourceGroup": "rg-mcp-servers"
-    }
-  }
+  "prompt": "Migrate resources in subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 resource group rg-prod-web to Terraform",
+  "userId": "user@company.com"
 }
 ```
-**Response**: `Job ID: 550e8400-e29b-...`
 
-#### 2. Stream Progress
-**GET** `/jobs/{jobId}/progress`
+**Response (202 — Queued):**
+```json
+{
+  "workflowId": "a1b2c3d4-...",
+  "status": "queued",
+  "message": "Workflow queued — migrating rg-prod-web in subscription d0f1884d-...",
+  "subscriptionId": "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2",
+  "resourceGroup": "rg-prod-web",
+  "createdAt": "2026-03-03T10:00:00"
+}
+```
 
-**Event Types**:
-*   `connected`: Connection established.
-*   `stdout`: Real-time log output from PowerShell/Python.
-*   `stderr`: Error/Warning output.
-*   `complete`: Job finished.
+**Poll Status:**
+```bash
+GET /api/v1/workflow/a1b2c3d4-...?userId=user@company.com
+```
 
-### Example Usage (JavaScript)
-```javascript
-const source = new EventSource('http://localhost:8080/jobs/{id}/progress');
-source.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type === 'stdout') console.log(data.message);
-  if (data.type === 'complete') source.close();
-};
+**Status Response:**
+```json
+{
+  "workflowId": "a1b2c3d4-...",
+  "userId": "user@company.com",
+  "status": "running",
+  "prompt": "Migrate resources in subscription ...",
+  "steps": { "assessment": "completed", "export": "in_progress" },
+  "createdAt": "2026-03-03T10:00:00",
+  "updatedAt": "2026-03-03T10:05:30"
+}
+```
+
+### NLP Prompt Parsing
+
+The `nlp_parser.py` service extracts Azure parameters from natural language:
+
+| Prompt Pattern | Extracted |
+|---------------|-----------|
+| `"subscription d0f1884d-1f98-..."` | `subscriptionId = d0f1884d-1f98-...` |
+| `"resource group rg-prod-web"` | `resourceGroup = rg-prod-web` |
+| `"rg: rg-app-dev"` | `resourceGroup = rg-app-dev` |
+| `"sub: d0f1884d-..."` | `subscriptionId = d0f1884d-...` |
+
+If extraction fails, the API returns `400` with guidance on how to rephrase the prompt. Users can also pass `subscriptionId` and `resourceGroup` explicitly in the request body.
+
+### In-Memory Workflow State Tracking
+
+Workflow state is held in a **thread-safe in-memory dictionary** inside the FastAPI process. No external database or storage account is needed.
+
+#### How it works
+
+| Stage | State Update | What is stored |
+|-------|-------------|----------------|
+| API receives prompt | `queued` | workflowId, userId, prompt, subscriptionId, resourceGroup, timestamps |
+| Background task starts | `running` | steps map updated per agent (assessment → export → refactor) |
+| Each agent completes | `running` | individual step marked `completed`, next step `in_progress` |
+| Pipeline finishes | `completed` | full results dict, all steps `completed` |
+| Pipeline fails | `failed` | error message, partial step status preserved |
+
+#### State store implementation (`state_store.py`)
+
+```python
+import asyncio
+from typing import Dict, Optional
+from datetime import datetime
+
+_lock = asyncio.Lock()
+_workflows: Dict[str, dict] = {}   # workflowId → state dict
+
+async def save_state(workflow_id: str, data: dict):
+    async with _lock:
+        if workflow_id in _workflows:
+            _workflows[workflow_id].update(data)
+        else:
+            _workflows[workflow_id] = data
+        _workflows[workflow_id]["updatedAt"] = datetime.utcnow().isoformat()
+
+async def get_state(workflow_id: str) -> Optional[dict]:
+    return _workflows.get(workflow_id)
+
+async def list_by_user(user_id: str, limit: int = 20) -> list:
+    return sorted(
+        [w for w in _workflows.values() if w.get("userId") == user_id],
+        key=lambda w: w.get("createdAt", ""),
+        reverse=True,
+    )[:limit]
+
+def active_count() -> int:
+    return sum(1 for w in _workflows.values() if w.get("status") == "running")
+```
+
+#### Design decisions
+
+- **No external dependencies** — zero cost, no Cosmos DB / Storage Account / Redis needed
+- **Thread-safe** — `asyncio.Lock` protects concurrent reads/writes from background tasks
+- **Lightweight** — each workflow state is ~2-5 KB; thousands of workflows fit in memory
+- **Ephemeral by design** — state is cleared on process restart; sufficient for workflow tracking during execution
+- **Upgrade path** — swap `state_store.py` with a Cosmos DB or Redis implementation later without changing routes
+
+### Additional Environment Variables
+
+Add these to your existing `.env`:
+
+```bash
+# API Server
+API_HOST=0.0.0.0
+API_PORT=8000
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+```
+
+> No database connection strings required — state is in-memory.
+
+### Python Dependencies (added to requirements.txt)
+
+```
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+```
+
+### Running the API
+
+```bash
+# From apps-mcp-server/python/
+cd apps-mcp-server/python
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start API server (with auto-reload for development)
+uvicorn api.app:app --reload --port 8000
+
+# Or run directly
+python -m api.app
+```
+
+**Swagger docs**: `http://localhost:8000/docs`  
+**ReDoc**: `http://localhost:8000/redoc`
+
+### UI Integration (ai-aztfexport-ui)
+
+From the Next.js frontend, call the API:
+
+```typescript
+// Trigger workflow from user prompt
+const res = await fetch('http://localhost:8000/api/v1/workflow/trigger', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    prompt: userInput,           // e.g. "Migrate rg-prod in sub abc-123 to Terraform"
+    userId: currentUser.email,
+  }),
+});
+const { workflowId } = await res.json();
+
+// Poll for status
+const poll = setInterval(async () => {
+  const status = await fetch(
+    `http://localhost:8000/api/v1/workflow/${workflowId}?userId=${currentUser.email}`
+  ).then(r => r.json());
+
+  if (status.status === 'completed' || status.status === 'failed') {
+    clearInterval(poll);
+    // Display results or error
+  }
+}, 5000);
+```
+
+### Docker Deployment
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Build and run:
+```bash
+docker build -t aztf-workflow-api:v1 -f python/Dockerfile python/
+docker run -p 8000:8000 --env-file python/.env aztf-workflow-api:v1
 ```
 
 ---
