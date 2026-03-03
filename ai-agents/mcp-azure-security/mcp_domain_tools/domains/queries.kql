@@ -1,0 +1,13 @@
+// Defender for Cloud Alerts Extraction Query
+// Targets active threats with clean projection for JSON output
+securityresources
+| where type == 'microsoft.security/locations/alerts'
+| extend 
+    alertId = properties.systemAlertId,
+    issueType = properties.alertDisplayName,
+    severity = properties.severity,
+    resourceId = properties.compromisedEntity,
+    status = properties.status,
+    complianceStandards = properties.resourceDetails.ComplianceStandards
+| where status == 'Active'
+| project alertId, issueType, severity, resourceId, complianceStandards

@@ -12,3 +12,9 @@ PyYAML>=6.0
 python-dotenv>=1.0.0
 requests>=2.32.0  # For GitHub API integration
 python-hcl2>=7.0.0  # For Terraform HCL file parsing
+
+python-dotenv>=1.0.0
+azure-identity>=1.25.0
+azure-ai-projects>=2.0.0b4
+openai>=2.24.0
+

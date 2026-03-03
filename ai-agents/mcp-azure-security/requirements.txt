@@ -1,0 +1,19 @@
+# --- MCP SDK Framework ---
+fastmcp>=2.0             # Official Model Context Protocol SDK (includes FastMCP)
+
+# --- Web Server & API Framework ---
+fastapi                  # Web framework for the MCP Server logic and routes
+uvicorn                  # ASGI server to run the FastAPI application
+pydantic                 # Data validation and settings management
+
+# --- Azure Integration & Identity ---
+azure-identity           # Provides DefaultAzureCredential for Auth
+azure-mgmt-resourcegraph # SDK to execute KQL queries against Azure Resource Graph
+python-dotenv            # Loads environment variables from .env (for local testing)
+
+# --- Telemetry & Observability ---
+opentelemetry-api        # Standardized API for tracing
+opentelemetry-sdk        # Implementation for OpenTelemetry
+
+# --- Testing & Development ---
+pytest                   # Framework for running automated tests

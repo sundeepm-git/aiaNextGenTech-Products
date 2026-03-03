@@ -13,6 +13,47 @@ This becomes the workspace for all three agents and workflows.
 
 ---
 
+
+## Prerequisites
+
+1. Python 3.8+ installed
+2. Create and activate a virtual environment (recommended):
+   - Windows:
+     - `python -m venv venv`
+     - `venv\Scripts\activate`
+   - macOS/Linux:
+     - `python3 -m venv venv`
+     - `source venv/bin/activate`
+3. Install all dependencies:
+   - `pip install -r requirements.txt`
+4. FastAPI framework is used for MCP server implementation.
+5. Uvicorn is required to run the FastAPI app.
+6. Run the server from the mcp-azure-security directory:
+   - `python server.py`
+   
+
+## Command for MCP Inspector
+1. npx @modelcontextprotocol/inspector
+2. RUN via VS CODE terminal `npx @modelcontextprotocol/inspector python server.py`
+## Command to STOP the port-MCP
+netstat -ano | findstr :6274
+taskkill /PID 18568 /F 
+
+
+---
+
+## 1. MCP Server
+mcp-azure-security (single server)
+ ├── posture tools
+ ├── detection tools
+ ├── remediation tools
+ ├── governance tools
+ └── audit tools
+
+### 1.1.0 Creating MCP Server Tool
+
+### 1.2.0 RUN mcp server
+
 ## 2. Build the Detection Agent
 This agent receives Defender alerts and classifies the misconfiguration.
 
@@ -22,24 +63,17 @@ This agent receives Defender alerts and classifies the misconfiguration.
 - Model: GPT‑4o or Phi‑4
 - Mode: Reasoning + Tool Use (no tools yet)
 
-### 2.1.0 Creating MCP Server Tool
 
 ### 2.2 Add System Prompt
 ```
-You are the Detection Agent.
-Your job:
-1. Read Microsoft Defender for Cloud alerts.
-2. Extract resourceId, issueType, severity, and alertId.
-3. Output a clean JSON object with these fields.
-4. Do not fix anything. Only classify and extract.
+Refer - prompt-detection-agent.yml
 ```
-
-
-
 
 ### 2.3 Save Agent
 
 ---
+
+
 
 ## 3. Build the Remediation Agent
 This agent analyzes the violation and calls your MCP tool to fix it.

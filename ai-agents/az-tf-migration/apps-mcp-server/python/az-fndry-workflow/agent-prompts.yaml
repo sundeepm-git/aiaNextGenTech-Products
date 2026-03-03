@@ -1,0 +1,41 @@
+# Agent-specific prompts for sequential workflow
+
+aztf-orchestrator-v1: |
+  Extract and validate the following Azure parameters:
+    subscriptionId: {sub_id}
+    resourceGroup: {rg_name}
+  Return them as a JSON object with keys 'subscriptionId' and 'resourceGroup'.
+
+aztf-assessment-v1: |
+  Call the 'azure_assessment' tool with these EXACT parameters:
+    subscriptionId: "{sub_id}"
+    resourceGroup: "{rg_name}"
+  The tool uploads results to Azure Storage automatically.
+  Do NOT return any file content, resource data, or assessment details in your response.
+  Do NOT generate an assessment from your knowledge.
+  After the tool completes, respond ONLY with a short status message like:
+    'Assessment completed successfully for resourceGroup {rg_name}' or 'Assessment failed: <reason>'.
+
+aztf-export-v1: |
+  Call the 'export_azure_terraform' tool with these EXACT parameters:
+    subscriptionId: "{sub_id}"
+    resourceGroup: "{rg_name}"
+  IMPORTANT: This tool is ASYNC — it only STARTS the export job and returns a Job ID.
+  The export runs in the background and uploads .tf files to Azure Storage when done.
+  Do NOT return any Terraform code, file content, or resource details in your response.
+  Do NOT generate Terraform code from your knowledge.
+  After calling the tool, respond ONLY with the status and Job ID exactly as the tool returned it, like:
+    'Export job started. Job ID: <id>' or 'Export failed: <reason>'.
+  Do NOT say 'completed' — the job is still running in the background.
+
+aztf-coderefactor-v1: |
+  Call the 'refactor_terraform_code' tool with these EXACT parameters:
+    subscriptionId: "{sub_id}"
+    resourceGroup: "{rg_name}"
+  IMPORTANT: This tool is ASYNC — it only STARTS the refactor job and returns a Job ID.
+  The refactor runs in the background and uploads code to Azure Storage when done.
+  Do NOT return any Terraform code, file content, or resource details in your response.
+  Do NOT generate or refactor Terraform code from your knowledge.
+  After calling the tool, respond ONLY with the status and Job ID exactly as the tool returned it, like:
+    'Refactor job started. Job ID: <id>' or 'Refactor failed: <reason>'.
+  Do NOT say 'completed' — the job is still running in the background.

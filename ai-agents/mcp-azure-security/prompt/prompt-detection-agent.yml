@@ -1,0 +1,36 @@
+
+
+Building Detection Agent. That will detect threats based on Microsoft Defender for Cloud alerts. 
+The agent will read the alerts, extract relevant information, and output a clean JSON object with the necessary fields for further analysis.
+n based on the configured Security policies industry Standard (MCSB,CIS Microsoft Azure Foundations Benchmark v2.0.0
+, NIST) in Microsoft Defender for Cloud. The agent will focus on extracting key information from the alerts to facilitate quick identification and response to potential threats.
+
+Agent job:
+1. Read Microsoft Defender for Cloud alerts.
+2. Extract resourceId, issueType, severity, and alertId.
+3. Output a clean JSON object with these fields.
+4. Do not fix anything. Only classify and extract.
+5. Use azure cli or azure grap api to access the security alerts in Microsoft Defender for Cloud.
+5. Ensure the output is structured and easy to parse for further analysis by the other agents in the workflow.
+
+Implementation instructions:
+1. Use Azure CLI or Azure Graph API to access Microsoft Defender for Cloud alerts.
+2. Implement a function to read the alerts and extract the required fields.
+3. Format the extracted information into a clean JSON object.
+4. Ensure the agent can handle multiple alerts and output a list of JSON objects if necessary.
+5. Test the agent with sample alerts to ensure it correctly extracts and formats the information.
+6. detection.py is the mcp tool that will be called by the server.py - register_detection_tools function to execute the detection agent.
+7. The agent should be designed to run periodically to continuously monitor for new alerts in Microsoft Defender for Cloud. Consider implementing a scheduling mechanism to ensure the agent runs at regular intervals, such as every hour or every day, depending on the organization's needs.
+8. Ensure proper error handling and logging mechanisms are in place to track the agent's performance and troubleshoot any issues that may arise during execution.
+9. code should be modular and well-documented to facilitate maintenance and future enhancements. Consider using classes or functions to organize the code logically and improve readability.
+10. Consider implementing a configuration file to manage settings such as the frequency of execution, the specific alerts to monitor, and any authentication details required for accessing Microsoft Defender for Cloud.
+11. use environment variables to securely manage sensitive information such as API keys or authentication tokens required for accessing Microsoft Defender for Cloud.
+12. Ensure that the agent adheres to best practices for security and data privacy, especially when handling sensitive information from the alerts. Implement measures to protect the data and ensure compliance with relevant regulations and standards.
+13. This tool will host on container app in azure, so ensure that the code is compatible with containerization and can be easily deployed in a containerized environment. Consider using Docker to create a container image for the agent and ensure that it can run smoothly in the Azure Container Apps service.
+14. Implement logging and monitoring for the agent to track its performance and identify any issues that may arise during execution. Consider using Azure Monitor or another logging solution to capture logs and metrics from the agent for analysis and troubleshooting.
+15. Ensure that the agent is designed to be scalable and can handle a large volume of alerts without performance degradation. Consider implementing batching or parallel processing to efficiently handle multiple alerts and ensure timely detection of potential threats.
+16. it should include the Human in the loop (HITL) mechanism to allow security analysts to review and validate the extracted information from the alerts before it is used for further analysis or response actions. This can help ensure the accuracy and reliability of the information extracted by the agent and provide an additional layer of oversight in the detection process.
+17. Consider implementing a feedback mechanism to allow security analysts to provide feedback on the accuracy and usefulness of the extracted information from the alerts. This feedback can be used to continuously improve the agent's performance and ensure that it is providing valuable insights for threat detection and response.
+18. Ensure that the agent is designed to be extensible and can easily accommodate additional fields or information from the alerts in the future as needed. Consider using a flexible data structure to store the extracted information and allow for easy addition of new fields without requiring significant changes to the codebase.
+19. Implement unit tests and integration tests to ensure the reliability and correctness of the agent's functionality. Use a testing framework such as pytest to create test cases that cover various scenarios and edge cases for the agent's behavior. This will help ensure that the agent functions as expected and can handle different types of alerts and data inputs effectively.
+20. Document the code and provide clear instructions for deployment and usage of the agent. Include information on how to set up the necessary environment variables, configure the agent, and run it in a containerized environment. This documentation will help other developers and security analysts understand how to use and maintain the agent effectively.

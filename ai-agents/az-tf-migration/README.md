@@ -217,11 +217,56 @@ REFACTOR_SCRIPT_PATH=./python/refactor.py
 
 
 ### Prerequisites
-*   **Node.js**: 18+
-*   **PowerShell**: 7.x
-*   **Azure CLI**: Latest
-*   **Python**: 3.8+ with `pip install requests python-dotenv azure-storage-blob azure-identity`
-*   **aztfexport**: Installed and in PATH
+
+#### Runtime & Tooling
+| Tool | Version | Notes |
+|------|---------|-------|
+| **Node.js** | 18+ | MCP server runtime |
+| **PowerShell** | 7.x | Assessment & export scripts |
+| **Azure CLI** | Latest | `az login` or SPN auth |
+| **Python** | 3.10+ | Sequential workflow & refactor engine |
+| **aztfexport** | Latest | Must be installed and in PATH |
+| **Docker** | Latest | Required for container deployment |
+
+#### Python SDK Dependencies (Azure AI Foundry Workflow)
+Install from `python/requirements.txt` or manually:
+```bash
+pip install "azure-ai-projects>=2.0.0b4" "openai>=2.24.0" "azure-identity>=1.25.0" "python-dotenv>=1.0.0"
+```
+Additional packages for assessment & refactor engines:
+```bash
+pip install azure-storage-blob azure-mgmt-resource azure-mgmt-subscription PyYAML requests python-hcl2 jinja2
+```
+
+#### Azure AI Foundry Setup
+1. An **Azure AI Foundry** project with at least one deployed model (e.g., `gpt-4o`).
+2. Four **Foundry Agents** created and connected to the MCP server tool set:
+   - `aztf-orchestrator-v1` — NLP parameter extraction
+   - `aztf-assessment-v1` — calls `azure_assessment` MCP tool
+   - `aztf-export-v1` — calls `export_azure_terraform` MCP tool (async)
+   - `aztf-coderefactor-v1` — calls `refactor_terraform_code` MCP tool (async)
+3. Each agent must have the **MCP SSE** connection configured pointing to the Container App URL (e.g., `https://<app>.azurecontainerapps.io/sse`).
+
+#### Required Environment Variables (`.env`)
+The sequential workflow (`aztf-sequential-wf.py`) loads `.env` from two locations: its own directory and the parent `apps-mcp-server/.env`. Required variables:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `AZURE_AI_PROJECT_ENDPOINT` | `https://<resource>.services.ai.azure.com/api/projects/<project>` | Foundry project endpoint |
+| `MCP_SERVER_URL` | `https://aztf-mcp-app.<hash>.centralus.azurecontainerapps.io/` | Container App base URL for job polling |
+| `AZURE_CLIENT_ID` | `4a7f6b45-...` | Service Principal App ID |
+| `AZURE_CLIENT_SECRET` | `skC8Q~...` | Service Principal secret |
+| `AZURE_TENANT_ID` | `a0e1f124-...` | Azure AD Tenant ID |
+
+Optional tuning (defaults shown):
+```bash
+JOB_POLL_INTERVAL=15   # Seconds between job status polls
+JOB_POLL_TIMEOUT=1800  # Max seconds to wait for async job (30 min)
+JOB_HEARTBEAT_LOG=60   # Seconds between "still waiting" heartbeat logs
+```
+
+#### MCP Server Container App
+The MCP server must be deployed and running on Azure Container Apps. The `/jobs/:jobId` endpoint is used by the Python workflow to poll async export/refactor job completion before proceeding to the next pipeline step.
 
 #### Azure Authentication (Required for Automation/Production)
 
@@ -387,8 +432,13 @@ The included `deploy.ps1` script provides end-to-end automation for deploying th
  .\deploy.ps1 -ResourceGroupName "rg-mcp-servers" -SubscriptionId "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2" -TenantId "a0e1f124-d84e-4ef7-bf4b-926b60443fb9" -ClientId "4a7f6b45-8322-4cfe-bd16-008afdcc1221" -StorageAccountName "samcpstorage" -ContainerName "aztfexport" -ContainerAppName "aztf-mcp-app" -LogAnalyticsWorkspace "workspace-rgmcpserversIh7a" -AcrName "aztfmcpacr" -ImageTag "v2.3" -Port 3000 -MinReplicas 0 -MaxReplicas 1 -Cpu 0.25 -Memory "0.5Gi" -NoCache
 ```
 
-### Update Secret
+### Update Secret [Important Step] | Container APP URL
 Go to the container app and update the secret their copy from .env file and update
+Update container app URL in - .env file and MS foundry tool - e.g MCP SSE (Server Sent Event)- https://aztf-mcp-app.livelyflower-5ea8a87a.centralus.azurecontainerapps.io/sse
+
+### RUN Sequential Workflow
+Go to the python/az-fndry-workflow/aztf-sequential-wf.py
+RUN python aztf-sequential-wf.py
 
 ## Command for MCP Inspector
 npx @modelcontextprotocol/inspector
@@ -436,7 +486,10 @@ az role assignment create \
   --scope /subscriptions/.../storageAccounts/samcpstorage
 ```
 
----
+--
+### RUN Azure Foundry Sequential Workflow [NOTE all Python code and dependencies maintained in python folder all automation and sequential azure foundry workflow]
+python aztf-sequential-wf.py
+
 
 ## 8. Development & Modularization
 

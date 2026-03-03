@@ -36,7 +36,7 @@ if(!isStdioMode) {
 
 import { executeAssessmentJob, assessmentToolDefinition, assessmentToolHandler } from './tools/assessment.js';
 // Import the new Python tool wrapper
-import { aztfexportTool } from './tools/aztfexport.js';
+import { aztfexportTool, exportJobs } from './tools/aztfexport.js';
 import { refactorToolDefinition, refactorToolHandler, executeRefactorJob } from './tools/code-refactor.js';
 
 // Log tool registration only in HTTP/SSE mode
@@ -151,10 +151,11 @@ app.get("/health", (req, res) => {
     });
 });
 
-// Job status endpoint for polling
+// Job status endpoint for polling (checks assessment/refactor jobs AND export jobs)
 app.get("/jobs/:jobId", (req, res) => {
     const { jobId } = req.params;
-    const job = toolContext.jobs.get(jobId);
+    // Check both toolContext.jobs (assessment/refactor) and exportJobs (export)
+    const job = toolContext.jobs.get(jobId) || exportJobs.get(jobId);
     
     if (!job) {
         return res.status(404).json({ error: "Job not found" });
