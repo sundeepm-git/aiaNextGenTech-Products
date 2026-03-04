@@ -1,804 +1,599 @@
----
+# Azure-to-Terraform Migration — Agentic AI Pipeline
 
-## 🔑 Agent Workflow, Deployment, and Secret Management (2024 Update)
+> LLM-driven agents + MCP tools for automated Azure resource assessment, Terraform export, and code refactoring.
 
-### Agent Workflow
-
-1. **Assessment Agent**: Scans Azure resources and generates a detailed assessment report (JSON/YAML). Implemented in `assessment.py` and invoked by the Node.js MCP server.
-2. **Export Agent**: Converts the assessment output into Terraform code using `Export-Container-AzToTerraform.py` (Python) and PowerShell wrappers. Handles authentication and uploads results to Azure Blob or GitHub.
-3. **Refactor Agent**: Optimizes and enforces standards on exported Terraform code using `code-refactor.py` and `tf_refactor_variable.py`.
-4. **Deployment**: The orchestrator (Node.js/PowerShell) deploys the generated code to the target environment.
-
-### Python Code Implementation
-
-- `assessment.py`: Performs Azure resource assessment and outputs a report.
-- `Export-Container-AzToTerraform.py`: Exports resources to Terraform HCL and tfstate.
-- `code-refactor.py`: Refactors Terraform code for best practices and compliance.
-
-All scripts are orchestrated by the Node.js server and PowerShell scripts, with configuration via `.env`.
-
-### Deployment Steps
-
-1. **Prepare Environment**: Ensure Azure CLI, Docker, and required permissions are available. Populate `.env` with all required values (see below).
-2. **Run Deployment Script**: Execute `./apps-mcp-server/deploy.ps1` to build, push, and deploy the container app. The script:
-  - Builds the Docker image with all agent scripts
-  - Pushes the image to Azure Container Registry (ACR)
-  - Deploys or updates the Azure Container App
-  - Configures environment variables and secrets
-3. **Wait for Readiness**: The script waits for the container app to become ready and outputs the public FQDN.
-4. **Check Logs**: Use `az containerapp logs show --name <app-name> --resource-group <rg> --follow` to view logs.
-
-### Secret Management
-
-- **Client secrets** (e.g., `AZURE_CLIENT_SECRET`) are securely managed using Azure Container App secrets.
-- The deployment script adds the client secret as a secret named `azure-client-secret` using `--secrets` (on create) or `--set-secrets` (on update).
-- Environment variables such as `AZURE_CLIENT_SECRET` and `ARM_CLIENT_SECRET` are mapped to `secretref:azure-client-secret`.
-- Secrets are never exposed in logs or code. The script ensures all sensitive values are referenced via `secretref`.
-
-**Example (from deploy.ps1):**
-
-```powershell
-$envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
-$azArgs += '--secrets'
-$azArgs += "azure-client-secret=$ClientSecret"
-```
-
-### .env File Example
-
-```
-RESOURCE_GROUP=your-rg
-ACR_NAME=youracr
-CONTAINER_APP_ENV=your-env
-CONTAINER_APP_NAME=your-app
-LOG_ANALYTICS_WORKSPACE=your-law
-SUBSCRIPTION_ID=xxxx-xxxx-xxxx-xxxx
-TENANT_ID=xxxx-xxxx-xxxx-xxxx
-CLIENT_ID=xxxx-xxxx-xxxx-xxxx
-CLIENT_SECRET=your-client-secret
-STORAGE_ACCOUNT=yourstorage
-STORAGE_CONTAINER=yourcontainer
-```
-
-### Troubleshooting
-
-- Ensure all required secrets and environment variables are set in `.env`.
-- If you see `SecretRef 'azure-client-secret' not found`, ensure the secret is set at creation or update time (the script handles this automatically).
-- Use the provided log commands to debug deployment issues.
-
----
-# 📚 Table of Contents
-1. [System Architecture](#1-system-architecture)
-2. [Agents & Workflow Details](#2-agents--workflow-details)
-3. [Configuration & Output Destinations](#3-configuration--output-destinations)
-4. [Installation & Local Setup](#4-installation--local-setup)
-5. [Real-Time Progress Streaming](#5-real-time-progress-streaming)
-6. [GitHub Integration](#6-github-integration)
-7. [Deployment Guide](#7-deployment-guide)
-8. [Development & Modularization](#8-development--modularization)
-9. [Troubleshooting & Fixes](#9-troubleshooting--fixes)
+**Maintainer**: Sundeep K Maheshwari | **License**: MIT
 
 ---
 
-# Azure Terraform Migration & MCP Server
+## Table of Contents
 
-**Version:** 2.0.1  
-**Runtime:** Node.js, PowerShell, Python  
-**Protocol:** Model Context Protocol (MCP)
-
-This is a production-grade, modular MCP server designed to orchestrate the migration of Azure resources to Terraform. it uses a chain of AI agents and specialized tools to assess, export, and refactor infrastructure code.
-
-This README consolidates all project documentation into a single source of truth.
-
----
-
-## 1. System Architecture
-
-The system supports dual output destinations (Azure Blob Storage and GitHub) and is configured via the `.env` file. The architecture includes Python, PowerShell, and Node.js entry points.
-
-### System Overview
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         .env Configuration File                      │
-│  OUTPUT_DESTINATION = "azure" | "github"                            │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    refactor.py (Main Entry Point)                    │
-│  • Loads .env                                                       │
-│  • Initializes TerraformRefactorEngine                              │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│              TerraformRefactorEngine (tf_refactor_variable.py)      │
-│  If OUTPUT_DESTINATION == "azure":                                  │
-│    • Use Azure Blob Storage (containers: aztfexport, code-refactored)│
-│  If OUTPUT_DESTINATION == "github":                                 │
-│    • Use GitHub Repo (folders: aztfexport/, code-refactored/)       │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Component Stack
-*   **MCP Server (Node.js)**: Handles API requests, job management, and SSE streaming.
-*   **PowerShell Scripts**: Execute Azure assessment and `aztfexport` logic.
-*   **Python Engine**: Performs intelligent code refactoring and GitHub/Azure integration.
+1. [System Design & Architecture](#1-system-design--architecture)
+2. [Environment Setup](#2-environment-setup)
+3. [Docker Build & Container Deployment](#3-docker-build--container-deployment)
+4. [Post-Deployment: Secrets & MCP URL Update](#4-post-deployment-secrets--mcp-url-update)
+5. [Azure AI Foundry Agent Setup](#5-azure-ai-foundry-agent-setup)
+6. [Running the Sequential Workflow](#6-running-the-sequential-workflow)
+7. [Agents & Workflow Details](#7-agents--workflow-details)
+8. [API — Expose Workflow as REST (Pending)](#8-api--expose-workflow-as-rest-pending)
+9. [GitHub Integration](#9-github-integration)
+10. [MCP Inspector & Debugging](#10-mcp-inspector--debugging)
+11. [Troubleshooting & Fixes](#11-troubleshooting--fixes)
 
 ---
 
-## 2. Agents & Workflow Details
+## 1. System Design & Architecture
 
-The solution uses a chain of specialized agents/tools.
+### Architecture Diagram
 
-### 1. Migration Orchestrator Agent
-**Purpose:** Extracts and validates user migration requirements from natural language.
-*   **Input**: User prompt (e.g., "Migrate rg-app from sub-123").
-*   **Details**: Validates subscription ID format and resource group existence.
-*   **Output**:
-    ```json
-    {
-      "subscriptionId": "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2",
-      "resourceGroups": ["rg-app-dev", "rg-data-dev"],
-      "outPath": "/assessment"
-    }
-    ```
+![System Architecture](apps-mcp-server/Architecture-Diagram.png)
 
-### 2. Assessment Agent (`infraAzTfAssessmentAgent-v1`)
-**Purpose:** Performs managed-only Azure resource assessment.
-*   **Details**: Calls `assess_azure_environment` tool. Generates HTML/PDF reports.
-*   **Output**: 
-    ```json
-    {
-      "status": "completed",
-      "subscriptionId": "<sub-guid>",
-      "outPath": "/assessment",
-      "artifacts": {
-        "xlsx": "https://<storage>.blob.core.windows.net/.../report.xlsx",
-        "pdf": "https://<storage>.blob.core.windows.net/.../report.pdf"
-      }
-    }
-    ```
+> Source Visio file: [Architecture.vsdx](Architecture.vsdx)
 
-### 3. Export Tool (`AztfExportPS-Tool`)
-**Purpose:** Exports Azure resources to Terraform HCL and tfstate.
-*   **Details**: Runs `aztfexport` via PowerShell. Handles authentication and temp file management.
-*   **Output**: Raw Terraform files (`main.tf`, `provider.tf`, `terraform.tfstate`) uploaded to `aztfexport` container/folder.
+### Sequence Diagram — Agent Workflow
 
-### 4. Refactor Agent (`TerraformRefactor-Agent`)
-**Purpose:** Refactors exported code using naming standards and tagging rules.
-*   **Details**: Runs `refactor.py`.
-    *   Do NOT add remote backend (preserve local state).
-    *   Enforce tags (owner, businessUnit, etc.).
-    *   Apply naming conventions from `naming-standard.json`.
-*   **Output**: Refactored `.tf` files in `code-refactored` container/folder.
+```mermaid
+sequenceDiagram
+    participant User
+    participant Orchestrator as Orchestrator Agent
+    participant Assessment as Assessment Agent
+    participant Export as Export Agent
+    participant Refactor as Refactor Agent
+    participant MCP as MCP Server (Container App)
+    participant Azure as Azure Subscription
+    participant Storage as Azure Storage / GitHub
 
----
+    User->>Orchestrator: NLP prompt (subscription + resource group)
+    Orchestrator->>Orchestrator: Extract & validate parameters
 
-## 3. Configuration & Output Destinations
+    Orchestrator->>Assessment: Trigger assessment
+    Assessment->>MCP: Call azure_assessment tool
+    MCP->>Azure: Scan resources (ARM API)
+    Azure-->>MCP: Resource inventory
+    MCP-->>Assessment: Assessment report (HTML/JSON)
+    Assessment->>Storage: Upload report
+    Assessment-->>Orchestrator: Step completed
 
-All configuration is managed through the `.env` file in the root directory.
+    Orchestrator->>Export: Trigger export (async)
+    Export->>MCP: Call export_azure_terraform tool
+    MCP->>Azure: Run aztfexport
+    Azure-->>MCP: main.tf, provider.tf, tfstate
+    MCP-->>Export: Raw Terraform files
+    Export->>Storage: Upload raw TF files
+    Export-->>Orchestrator: Step completed (poll /jobs/:jobId)
 
-### Environment Variables (.env)
+    Orchestrator->>Refactor: Trigger refactor (async)
+    Refactor->>MCP: Call refactor_terraform_code tool
+    MCP->>MCP: Refactor engine (variables.tf, tfvars, naming)
+    MCP-->>Refactor: Refactored TF files + report
+    Refactor->>Storage: Upload refactored code
+    Refactor-->>Orchestrator: Step completed (poll /jobs/:jobId)
 
-```bash
-# Server Configuration
-PORT=8080
-LOG_LEVEL=info
-
-# Output Destination Configuration
-# Options: "azure" or "github" or "both"
-OUTPUT_DESTINATION=both
-
-# Azure Storage Configuration (Required if destination is azure or both)
-storageAccountRG=rg-mcp-servers
-storageAccount=samcpstorage
-# Note: Azure Auth uses CLI login or Managed Identity
-
-# GitHub Configuration (Required if destination is github or both)
-GITHUB_TOKEN=ghp_your_token_here
-GITHUB_OWNER=your-org
-GITHUB_REPO=your-repo
-GITHUB_BRANCH=main
-
-# Script Paths
-POWERSHELL_SCRIPT_PATH=./ps/assessment-AzSubscription.ps1
-EXPORT_SCRIPT_PATH=./ps/Export-AzToTerraform.ps1
-REFACTOR_SCRIPT_PATH=./python/refactor.py
+    Orchestrator-->>User: Final results & artifact links
 ```
 
-### Output Folder Names
-*   **Assessment Reports**: `assessment-reports/{subscription_id}/`
-*   **Export Output**: `aztfexport/{subscription_id}/{rg_name}/`
-*   **Refactored Code**: `code-refactored/{subscription_id}/{rg_name}/`
+### High-Level Component Diagram
 
----
+```mermaid
+flowchart TB
+    subgraph "Agentic AI Layer"
+        LLM["LLM (GPT-4o)"]
+        Orch["Orchestrator Agent"]
+        Assess["Assessment Agent"]
+        Export["Export Agent"]
+        Refactor["Refactor Agent"]
+    end
 
-## 4. Installation & Local Setup
+    subgraph "MCP Tooling Layer"
+        MCPServer["MCP Server — Azure Container App"]
+        T1["azure_assessment"]
+        T2["export_azure_terraform"]
+        T3["refactor_terraform_code"]
+    end
 
+    subgraph "Azure Platform Layer"
+        Sub["Azure Subscription"]
+        RG["Resource Group"]
+        Blob["Azure Storage Account"]
+        GH["GitHub Repo"]
+    end
 
-### Prerequisites
-
-#### Runtime & Tooling
-| Tool | Version | Notes |
-|------|---------|-------|
-| **Node.js** | 18+ | MCP server runtime |
-| **PowerShell** | 7.x | Assessment & export scripts |
-| **Azure CLI** | Latest | `az login` or SPN auth |
-| **Python** | 3.10+ | Sequential workflow & refactor engine |
-| **aztfexport** | Latest | Must be installed and in PATH |
-| **Docker** | Latest | Required for container deployment |
-
-#### Python SDK Dependencies (Azure AI Foundry Workflow)
-Install from `python/requirements.txt` or manually:
-```bash
-pip install "azure-ai-projects>=2.0.0b4" "openai>=2.24.0" "azure-identity>=1.25.0" "python-dotenv>=1.0.0"
+    LLM --> Orch
+    Orch --> Assess --> MCPServer
+    Orch --> Export --> MCPServer
+    Orch --> Refactor --> MCPServer
+    MCPServer --> T1 & T2 & T3
+    T1 & T2 --> Sub & RG
+    T3 --> Blob
+    T1 & T2 & T3 --> Blob
+    T1 & T2 & T3 -.-> GH
 ```
-Additional packages for assessment & refactor engines:
-```bash
-pip install azure-storage-blob azure-mgmt-resource azure-mgmt-subscription PyYAML requests python-hcl2 jinja2
-```
-
-#### Azure AI Foundry Setup
-1. An **Azure AI Foundry** project with at least one deployed model (e.g., `gpt-4o`).
-2. Four **Foundry Agents** created and connected to the MCP server tool set:
-   - `aztf-orchestrator-v1` — NLP parameter extraction
-   - `aztf-assessment-v1` — calls `azure_assessment` MCP tool
-   - `aztf-export-v1` — calls `export_azure_terraform` MCP tool (async)
-   - `aztf-coderefactor-v1` — calls `refactor_terraform_code` MCP tool (async)
-3. Each agent must have the **MCP SSE** connection configured pointing to the Container App URL (e.g., `https://<app>.azurecontainerapps.io/sse`).
-
-#### Required Environment Variables (`.env`)
-The sequential workflow (`aztf-sequential-wf.py`) loads `.env` from two locations: its own directory and the parent `apps-mcp-server/.env`. Required variables:
-
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `AZURE_AI_PROJECT_ENDPOINT` | `https://<resource>.services.ai.azure.com/api/projects/<project>` | Foundry project endpoint |
-| `MCP_SERVER_URL` | `https://aztf-mcp-app.<hash>.centralus.azurecontainerapps.io/` | Container App base URL for job polling |
-| `AZURE_CLIENT_ID` | `4a7f6b45-...` | Service Principal App ID |
-| `AZURE_CLIENT_SECRET` | `skC8Q~...` | Service Principal secret |
-| `AZURE_TENANT_ID` | `a0e1f124-...` | Azure AD Tenant ID |
-
-Optional tuning (defaults shown):
-```bash
-JOB_POLL_INTERVAL=15   # Seconds between job status polls
-JOB_POLL_TIMEOUT=1800  # Max seconds to wait for async job (30 min)
-JOB_HEARTBEAT_LOG=60   # Seconds between "still waiting" heartbeat logs
-```
-
-#### MCP Server Container App
-The MCP server must be deployed and running on Azure Container Apps. The `/jobs/:jobId` endpoint is used by the Python workflow to poll async export/refactor job completion before proceeding to the next pipeline step.
-
-#### Azure Authentication (Required for Automation/Production)
-
-For all automation, CI/CD, and production scenarios, you **must** use a Service Principal (SPN) for Azure CLI authentication. This ensures secure, non-interactive access.
-
-1. **Create a Service Principal:**
-  ```bash
-  az ad sp create-for-rbac --name <sp-name> --role Contributor --scopes /subscriptions/<subscription-id>
-  ```
-  Note the `appId`, `password`, and `tenant` from the output.
-
-2. **Set the following environment variables before running any scripts:**
-  ```bash
-  export AZURE_CLIENT_ID=<appId>
-  export AZURE_CLIENT_SECRET=<password>
-  export AZURE_TENANT_ID=<tenant>
-  ```
-  On Windows (PowerShell):
-  ```powershell
-  $env:AZURE_CLIENT_ID = "<appId>"
-  $env:AZURE_CLIENT_SECRET = "<password>"
-  $env:AZURE_TENANT_ID = "<tenant>"
-  ```
-
-3. **The script will automatically attempt SPN login if these variables are set.**
-
-4. For local development, you may use `az login` interactively, but using SPN is recommended for consistency.
-
-5. Example SPN login command (for reference):
-  ```bash
-  az login --service-principal -u <appId> -p <password> --tenant <tenant>
-  ```
-
-### Server Modes
-
-
-## 4. API - Expose Azure Foundry Workflow as API (Implementation Pending)
-
-The sequential Azure Foundry workflow (`aztf-sequential-wf.py`) is exposed as a REST API using **FastAPI**, allowing the `ai-aztfexport-ui` frontend to trigger migration workflows via NLP prompts. Workflow state is tracked **in-memory** during execution — no external storage account or database is required for state management.
-
-### Architecture
-
-```
-┌──────────────────────────┐       POST /api/v1/workflow/trigger        ┌──────────────────────────────┐
-│   ai-aztfexport-ui       │ ─────────────────────────────────────────► │  FastAPI  (api/app.py)       │
-│   (Next.js / React)      │ ◄──── { workflowId, status: "queued" } ── │  Port 8000                   │
-│                          │                                            └──────────┬───────────────────┘
-│  - User types NLP prompt │       GET /api/v1/workflow/{id}                       │
-│  - Polls workflow status │ ─────────────────────────────────────────►            │
-│  - Displays results      │ ◄──── { status, steps, results }                     │
-└──────────────────────────┘                                            ┌──────────▼───────────────────┐
-                                                                        │  Background Task             │
-                                                                        │  workflow_runner.py           │
-                                                                        │  ┌────────────────────────┐  │
-                                                                        │  │ aztf-sequential-wf.py  │  │
-                                                                        │  │ (existing pipeline)     │  │
-                                                                        │  └────────────────────────┘  │
-                                                                        └──────────┬───────────────────┘
-                                                                                   │ update state
-                                                                        ┌──────────▼───────────────────┐
-                                                                        │  In-Memory State Store       │
-                                                                        │  Dict[workflowId, state]     │
-                                                                        │  Thread-safe (asyncio.Lock)  │
-                                                                        │  Cleared on process restart  │
-                                                                        └──────────────────────────────┘
-```
-
-> **Note:** Workflow state lives in the FastAPI process memory. It is available for the lifetime of the server. If the process restarts, in-flight workflow history is lost. For production persistence, plug in Cosmos DB or any external store later.
-
-### API Directory Structure
-
-All API code lives inside the existing `apps-mcp-server/python/` folder:
-
-```
-apps-mcp-server/python/
-├── az-fndry-workflow/              # Existing (unchanged)
-│   ├── aztf-sequential-wf.py      #   Sequential pipeline
-│   └── agent-prompts.yaml         #   Agent prompt definitions
-├── api/                            # NEW — FastAPI application
-│   ├── app.py                     #   Entry point, CORS, route registration
-│   ├── routes/
-│   │   ├── workflow.py            #   POST trigger, GET status, GET list
-│   │   └── health.py             #   GET /health
-│   ├── models/
-│   │   ├── request.py            #   WorkflowRequest pydantic model
-│   │   └── response.py           #   WorkflowResponse, WorkflowStatus
-│   ├── services/
-│   │   ├── nlp_parser.py         #   Extract sub/rg from NLP prompt
-│   │   ├── state_store.py        #   In-memory workflow state store
-│   │   └── workflow_runner.py    #   Background execution wrapper
-│   └── config/
-│       └── settings.py           #   Centralized env configuration
-├── .env                           # Environment variables
-├── requirements.txt               # Updated with FastAPI, uvicorn, pydantic
-└── Dockerfile                     # Python API container
-```
-
-### API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/workflow/trigger` | Trigger workflow from NLP prompt (async, returns immediately) |
-| `GET`  | `/api/v1/workflow/{workflowId}` | Get workflow status (in-memory lookup) |
-| `GET`  | `/api/v1/workflows?userId=&limit=20` | List user workflows (filtered from memory) |
-| `GET`  | `/health` | Health check with uptime and active workflow count |
-
-### Request / Response Examples
-
-**Trigger Workflow:**
-```bash
-POST /api/v1/workflow/trigger
-Content-Type: application/json
-
-{
-  "prompt": "Migrate resources in subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 resource group rg-prod-web to Terraform",
-  "userId": "user@company.com"
-}
-```
-
-**Response (202 — Queued):**
-```json
-{
-  "workflowId": "a1b2c3d4-...",
-  "status": "queued",
-  "message": "Workflow queued — migrating rg-prod-web in subscription d0f1884d-...",
-  "subscriptionId": "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2",
-  "resourceGroup": "rg-prod-web",
-  "createdAt": "2026-03-03T10:00:00"
-}
-```
-
-**Poll Status:**
-```bash
-GET /api/v1/workflow/a1b2c3d4-...?userId=user@company.com
-```
-
-**Status Response:**
-```json
-{
-  "workflowId": "a1b2c3d4-...",
-  "userId": "user@company.com",
-  "status": "running",
-  "prompt": "Migrate resources in subscription ...",
-  "steps": { "assessment": "completed", "export": "in_progress" },
-  "createdAt": "2026-03-03T10:00:00",
-  "updatedAt": "2026-03-03T10:05:30"
-}
-```
-
-### NLP Prompt Parsing
-
-The `nlp_parser.py` service extracts Azure parameters from natural language:
-
-| Prompt Pattern | Extracted |
-|---------------|-----------|
-| `"subscription d0f1884d-1f98-..."` | `subscriptionId = d0f1884d-1f98-...` |
-| `"resource group rg-prod-web"` | `resourceGroup = rg-prod-web` |
-| `"rg: rg-app-dev"` | `resourceGroup = rg-app-dev` |
-| `"sub: d0f1884d-..."` | `subscriptionId = d0f1884d-...` |
-
-If extraction fails, the API returns `400` with guidance on how to rephrase the prompt. Users can also pass `subscriptionId` and `resourceGroup` explicitly in the request body.
-
-### In-Memory Workflow State Tracking
-
-Workflow state is held in a **thread-safe in-memory dictionary** inside the FastAPI process. No external database or storage account is needed.
-
-#### How it works
-
-| Stage | State Update | What is stored |
-|-------|-------------|----------------|
-| API receives prompt | `queued` | workflowId, userId, prompt, subscriptionId, resourceGroup, timestamps |
-| Background task starts | `running` | steps map updated per agent (assessment → export → refactor) |
-| Each agent completes | `running` | individual step marked `completed`, next step `in_progress` |
-| Pipeline finishes | `completed` | full results dict, all steps `completed` |
-| Pipeline fails | `failed` | error message, partial step status preserved |
-
-#### State store implementation (`state_store.py`)
-
-```python
-import asyncio
-from typing import Dict, Optional
-from datetime import datetime
-
-_lock = asyncio.Lock()
-_workflows: Dict[str, dict] = {}   # workflowId → state dict
-
-async def save_state(workflow_id: str, data: dict):
-    async with _lock:
-        if workflow_id in _workflows:
-            _workflows[workflow_id].update(data)
-        else:
-            _workflows[workflow_id] = data
-        _workflows[workflow_id]["updatedAt"] = datetime.utcnow().isoformat()
-
-async def get_state(workflow_id: str) -> Optional[dict]:
-    return _workflows.get(workflow_id)
-
-async def list_by_user(user_id: str, limit: int = 20) -> list:
-    return sorted(
-        [w for w in _workflows.values() if w.get("userId") == user_id],
-        key=lambda w: w.get("createdAt", ""),
-        reverse=True,
-    )[:limit]
-
-def active_count() -> int:
-    return sum(1 for w in _workflows.values() if w.get("status") == "running")
-```
-
-#### Design decisions
-
-- **No external dependencies** — zero cost, no Cosmos DB / Storage Account / Redis needed
-- **Thread-safe** — `asyncio.Lock` protects concurrent reads/writes from background tasks
-- **Lightweight** — each workflow state is ~2-5 KB; thousands of workflows fit in memory
-- **Ephemeral by design** — state is cleared on process restart; sufficient for workflow tracking during execution
-- **Upgrade path** — swap `state_store.py` with a Cosmos DB or Redis implementation later without changing routes
-
-### Additional Environment Variables
-
-Add these to your existing `.env`:
-
-```bash
-# API Server
-API_HOST=0.0.0.0
-API_PORT=8000
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
-```
-
-> No database connection strings required — state is in-memory.
-
-### Python Dependencies (added to requirements.txt)
-
-```
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-```
-
-### Running the API
-
-```bash
-# From apps-mcp-server/python/
-cd apps-mcp-server/python
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start API server (with auto-reload for development)
-uvicorn api.app:app --reload --port 8000
-
-# Or run directly
-python -m api.app
-```
-
-**Swagger docs**: `http://localhost:8000/docs`  
-**ReDoc**: `http://localhost:8000/redoc`
-
-### UI Integration (ai-aztfexport-ui)
-
-From the Next.js frontend, call the API:
-
-```typescript
-// Trigger workflow from user prompt
-const res = await fetch('http://localhost:8000/api/v1/workflow/trigger', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    prompt: userInput,           // e.g. "Migrate rg-prod in sub abc-123 to Terraform"
-    userId: currentUser.email,
-  }),
-});
-const { workflowId } = await res.json();
-
-// Poll for status
-const poll = setInterval(async () => {
-  const status = await fetch(
-    `http://localhost:8000/api/v1/workflow/${workflowId}?userId=${currentUser.email}`
-  ).then(r => r.json());
-
-  if (status.status === 'completed' || status.status === 'failed') {
-    clearInterval(poll);
-    // Display results or error
-  }
-}, 5000);
-```
-
-### Docker Deployment
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-Build and run:
-```bash
-docker build -t aztf-workflow-api:v1 -f python/Dockerfile python/
-docker run -p 8000:8000 --env-file python/.env aztf-workflow-api:v1
-```
-
----
-
-## 6. GitHub Integration
-
-The system includes a dedicated Python helper `github_helper.py` and PowerShell module `GitHubHelper.psm1` to handle direct uploads to GitHub.
-
-### Setup
-1.  Generate a GitHub Personal Access Token (PAT) with `repo` scope.
-2.  Update `.env` with `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO`.
-3.  Set `OUTPUT_DESTINATION=github` or `both`.
-
-### Security Features
-*   **Branch Protection**: Uploads to specified branch.
-*   **.gitignore Generation**: The refactor engine automatically creates a `.gitignore` in the target folder to exclude:
-    *   `terraform.tfstate`
-    *   `main.tf` (if likely to contain secrets)
-    *   `.terraform/`
-*   **SHA Checking**: Checks existing file SHA before upload to avoid unnecessary commits.
-
----
-
-## 7. Deployment Guide
-
-### Azure Container Apps Deployment (`deploy.ps1`)
-
-The included `deploy.ps1` script provides end-to-end automation for deploying the MCP server to Azure Container Apps. It handles prerequisites, Docker build, ACR push, and Container App deployment with Managed Identity.
-
-**Usage Syntax:**
-```powershell
-.\apps-mcp-server\deploy.ps1 -ResourceGroup <name> -Location <region> [options]
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `ResourceGroup` | string | `rg-aztf-mcp-prod` | Name of the Azure Resource Group. |
-| `Location` | string | `eastus` | Azure region for resources. |
-| `AcrName` | string | | Name of the Azure Container Registry. |
-| `SubscriptionId` | string | | Azure Subscription ID. |
-| `ContainerAppEnv` | string | | Name of the Container App Environment. |
-| `ContainerAppName` | string | | Name of the Container App. |
-| `LogAnalyticsWorkspace`| string | | Name of the Log Analytics Workspace. |
-| `ImageTag` | string | `latest` | Tag for the Docker image. |
-| `Port` | int | `8080` | Port for the application. |
-| `Cpu` | string | `1.0` | CPU cores allocation. |
-| `Memory` | string | `2.0Gi` | Memory allocation. |
-| `MinReplicas` | int | `1` | Minimum container replicas. |
-| `MaxReplicas` | int | `3` | Maximum container replicas. |
-| `LogLevel` | string | `info` | Logging verbosity level. |
-| `NodeEnv` | string | `production` | Node.js environment mode. |
-| `SkipBuild` | switch | `false` | Skip Docker build step (deploy only). |
-| `SkipTests` | switch | `false` | Skip post-deployment verification tests. |
-
-**Script to RUN:**
-```powershell
- .\deploy.ps1 -ResourceGroupName "rg-mcp-servers" -SubscriptionId "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2" -TenantId "a0e1f124-d84e-4ef7-bf4b-926b60443fb9" -ClientId "4a7f6b45-8322-4cfe-bd16-008afdcc1221" -StorageAccountName "samcpstorage" -ContainerName "aztfexport" -ContainerAppName "aztf-mcp-app" -LogAnalyticsWorkspace "workspace-rgmcpserversIh7a" -AcrName "aztfmcpacr" -ImageTag "v2.3" -Port 3000 -MinReplicas 0 -MaxReplicas 1 -Cpu 0.25 -Memory "0.5Gi" -NoCache
-```
-
-### Update Secret [Important Step] | Container APP URL
-Go to the container app and update the secret their copy from .env file and update
-Update container app URL in - .env file and MS foundry tool - e.g MCP SSE (Server Sent Event)- https://aztf-mcp-app.livelyflower-5ea8a87a.centralus.azurecontainerapps.io/sse
-
-### RUN Sequential Workflow
-Go to the python/az-fndry-workflow/aztf-sequential-wf.py
-RUN python aztf-sequential-wf.py
-
-## Command for MCP Inspector
-npx @modelcontextprotocol/inspector
-
-## Command to STOP the port-MCP
-netstat -ano | findstr :6274
-taskkill /PID 18568 /F
-
-### Local Development Runner (`mcpserver-run.ps1`)
-
-The `mcpserver-run.ps1` script validates prerequisites and starts the MCP server locally for development and testing. It ensures Node.js dependencies, Azure auth, and `.env` configuration are present.
-
-**Usage Syntax:**
-```powershell
-.\md\mcpserver-run.ps1 [options]
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `Port` | int | `8080` | Port number for the server to listen on. |
-| `SkipChecks` | switch | `false` | Skip prerequisite validation checks. |
-| `ShowDetails` | switch | `false` | Display detailed diagnostic information. |
-
-**Example:**
-```powershell
-# Run with default checks on port 8080
-.\md\mcpserver-run.ps1
-
-# Run with detailed diagnostics
-.\md\mcpserver-run.ps1 -ShowDetails
-
-# Skip checks and use custom port
-.\md\mcpserver-run.ps1 -Port 3000 -SkipChecks
-```
-
-### Manual Permissions (Managed Identity)
-The Container App needs **System-Assigned Managed Identity** enabled and assigned the **Storage Blob Data Contributor** role on the target Storage Account.
-
-```bash
-az role assignment create \
-  --assignee $IDENTITY_PRINCIPAL_ID \
-  --role "Storage Blob Data Contributor" \
-  --scope /subscriptions/.../storageAccounts/samcpstorage
-```
-
---
-### RUN Azure Foundry Sequential Workflow [NOTE all Python code and dependencies maintained in python folder all automation and sequential azure foundry workflow]
-python aztf-sequential-wf.py
-
-
-## 8. Development & Modularization
-
-The codebase has been refactored for maintainability.
 
 ### Directory Structure
+
 ```
 apps-mcp-server/
-├── index.js                    # Main server entry & SSE logic
-├── tools/                      # Tool definitions
-│   ├── assessment.js          # Assessment logic
-│   ├── aztfexport.js          # Export logic wrapper
-│   └── code-refactor.js       # Refactor logic wrapper
-├── ps/                        # PowerShell Scripts
+├── index.js                    # Main MCP server entry & SSE logic
+├── Dockerfile                  # Container image definition
+├── deploy.ps1                  # End-to-end Azure deployment script
+├── .env                        # Environment configuration (DO NOT COMMIT)
+├── tools/                      # MCP tool definitions
+│   ├── assessment.js
+│   ├── aztfexport.js
+│   └── code-refactor.js
+├── ps/                         # PowerShell scripts
 │   ├── assessment-AzSubscription.ps1
 │   ├── Export-AzToTerraform.ps1
 │   └── GitHubHelper.psm1
-├── python/                    # Python Engines
-│   ├── refactor.py            # Main refactor entry point
+├── python/                     # Python engines & workflow
+│   ├── refactor.py             # Refactor entry point
 │   ├── tf_refactor_variable.py # Refactoring logic
-│   └── github_helper.py       # GitHub API integration
+│   ├── github_helper.py        # GitHub API integration
+│   └── az-fndry-workflow/
+│       └── aztf-sequential-wf.py  # Sequential Azure Foundry workflow
 └── package.json
 ```
 
 ---
 
-## 9. Testing with MCP Inspector
-
-The project supports interactive testing using the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector).
+## 2. Environment Setup
 
 ### Prerequisites
-Node.js installed.
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| **Node.js** | 18+ | MCP server runtime |
+| **PowerShell** | 7.x | Assessment & export scripts |
+| **Azure CLI** | Latest | `az login` or SPN auth |
+| **Python** | 3.10+ | Sequential workflow & refactor engine |
+| **aztfexport** | Latest | Must be installed and in PATH |
+| **Docker** | Latest | Container build & deployment |
+
+### Install Python Dependencies
+
 ```bash
-npx @modelcontextprotocol/inspector --version
+# Azure AI Foundry workflow dependencies
+pip install "azure-ai-projects>=2.0.0b4" "openai>=2.24.0" "azure-identity>=1.25.0" "python-dotenv>=1.0.0"
+
+# Assessment & refactor engine dependencies
+pip install azure-storage-blob azure-mgmt-resource azure-mgmt-subscription PyYAML requests python-hcl2 jinja2
 ```
 
-### 1. Local Testing
-To test the server running locally:
-
-**Step 1: Start the Server**
-```powershell
-# In one terminal
-.\md\mcpserver-run.ps1
+Or install all at once:
+```bash
+pip install -r apps-mcp-server/python/requirements.txt
 ```
 
-**Step 2: Run Inspector**
-```powershell
-# In a second terminal
-npx @modelcontextprotocol/inspector http://localhost:8080/sse
+### Install Node.js Dependencies
+
+```bash
+cd apps-mcp-server
+npm install
 ```
 
-**Step 3: Execute Tools**
-*   Open the browser window launched by Inspector.
-*   Select `assess_azure_environment`.
-*   Input JSON arguments: `{"subscriptionId": "...", "resourceGroup": "..."}`.
-*   Click **Run Tool** and look for the returned `Job ID`.
+### Configure `.env` File
 
-### 2. Container Testing
-To test the deployed Azure Container App:
+Create/update `apps-mcp-server/.env` with the following values:
 
-**Step 1: Get Endpoint**
-```powershell
-$URL = az containerapp show --name aztf-mcp-app --resource-group rg-mcp-servers --query properties.configuration.ingress.fqdn -o tsv
-# Endpoint format: https://<URL>/sse
+```bash
+# ===============================================
+# Server Configuration
+# ===============================================
+PORT=3000
+LOG_LEVEL=info
+
+# ===============================================
+# Azure Authentication (Service Principal)
+# ===============================================
+AZURE_CLIENT_ID=<your-service-principal-app-id>
+AZURE_CLIENT_SECRET=<your-service-principal-secret>
+AZURE_TENANT_ID=<your-azure-tenant-id>
+AZURE_OBJECT_ID=<your-service-principal-object-id>
+
+# ===============================================
+# MCP Server URL (UPDATE AFTER CONTAINER DEPLOYMENT)
+# ===============================================
+# This is the Container App FQDN — update after running deploy.ps1
+MCP_SERVER_URL=https://<your-container-app-name>.<hash>.<region>.azurecontainerapps.io/
+
+# ===============================================
+# Azure AI Foundry Project
+# ===============================================
+AZURE_AI_PROJECT_ENDPOINT=https://<foundry-resource>.services.ai.azure.com/api/projects/<project-name>
+
+# ===============================================
+# Output Destination: "azure" | "github" | "both"
+# ===============================================
+OUTPUT_DESTINATION=both
+
+# Azure Storage (required if destination = azure or both)
+storageAccountRG=rg-mcp-servers
+storageAccount=samcpstorage
+
+# GitHub (required if destination = github or both)
+GITHUB_TOKEN=<your-github-pat>
+GITHUB_OWNER=<your-github-org-or-user>
+GITHUB_REPO=<your-terraform-repo>
+GITHUB_BRANCH=main
+
+# ===============================================
+# Script Paths
+# ===============================================
+POWERSHELL_SCRIPT_PATH=./ps/assessment-AzSubscription.ps1
+EXPORT_SCRIPT_PATH=./ps/Export-AzToTerraform.ps1
+REFACTOR_SCRIPT_PATH=./python/refactor.py
+
+# ===============================================
+# Job Polling (optional tuning)
+# ===============================================
+JOB_POLL_INTERVAL=15
+JOB_POLL_TIMEOUT=1800
+JOB_HEARTBEAT_LOG=60
 ```
 
-**Step 2: Run Inspector**
-```powershell
-npx @modelcontextprotocol/inspector https://$URL/sse
+### Azure Service Principal Setup
+
+```bash
+# Create SPN with Contributor role
+az ad sp create-for-rbac --name <sp-name> --role Contributor \
+  --scopes /subscriptions/<subscription-id>
+
+# Note the appId, password, and tenant from the output
+# Update .env with these values
 ```
-*(Replace `$URL` with the actual variable value or string)*
+
+### Output Folder Structure
+
+| Artifact | Storage Path |
+|----------|-------------|
+| Assessment Reports | `assessment-reports/{subscription_id}/` |
+| Export Output | `aztfexport/{subscription_id}/{rg_name}/` |
+| Refactored Code | `code-refactored/{subscription_id}/{rg_name}/` |
 
 ---
 
-## 10. Troubleshooting & Fixes
+## 3. Docker Build & Container Deployment
 
-### Common Issues
+### Docker Commands
 
-#### 1. "StorageAccount parameter is required" or Upload Fails
-*   **Cause**: Environment variables not passed to spawned PowerShell process.
-*   **Status**: **FIXED** in v2.0.1.
-*   **Fix**: Ensure `tools/aztfexport.js` spawn call includes `env: { ...process.env, storageAccount }`.
-
-#### 2. Invalid JobId Parameter
-*   **Cause**: Older version of PowerShell script expected `-JobId`.
-*   **Status**: **FIXED**. Script now uses `{SubscriptionId}/{ResourceGroup}` path structure.
-*   **Fix**: Ensure `tools/aztfexport.js` does NOT pass `-JobId` to PowerShell.
-
-#### 3. SSE Disconnects
-*   **Cause**: MCP SDK or Proxy issues.
-*   **Workaround**: Use Stdio mode for production/stable clients. For HTTP, ensure client handles auto-reconnect.
-
-#### 4. GitHub Upload 403/404
-*   **Cause**: Token scope or Repo name.
-*   **Fix**: Verify PAT has `repo` scope. Check `GITHUB_OWNER` spelling.
-
-### Logs
-Check logs via:
 ```bash
-# Azure
+# Navigate to the MCP server directory
+cd apps-mcp-server
+
+# Build the Docker image
+docker build --no-cache -t aztf-mcp-server:v2.3 .
+
+# Test locally (optional)
+docker run -p 3000:3000 --env-file .env aztf-mcp-server:v2.3
+
+# Tag for ACR
+docker tag aztf-mcp-server:v2.3 <your-acr-name>.azurecr.io/aztf-mcp-server:v2.3
+
+# Login to ACR
+az acr login --name <your-acr-name>
+
+# Push to ACR
+docker push <your-acr-name>.azurecr.io/aztf-mcp-server:v2.3
+```
+
+### Automated Deployment via `deploy.ps1`
+
+The `deploy.ps1` script handles everything end-to-end: ACR creation, Docker build, push, Container App creation, environment variables, and secrets.
+
+```powershell
+.\deploy.ps1 `
+  -ResourceGroupName "rg-mcp-servers" `
+  -SubscriptionId "<subscription-id>" `
+  -TenantId "<tenant-id>" `
+  -ClientId "<client-id>" `
+  -StorageAccountName "samcpstorage" `
+  -ContainerName "aztfexport" `
+  -ContainerAppName "aztf-mcp-app" `
+  -LogAnalyticsWorkspace "workspace-rgmcpserversIh7a" `
+  -AcrName "aztfmcpacr" `
+  -ImageTag "v2.3" `
+  -Port 3000 `
+  -MinReplicas 0 `
+  -MaxReplicas 1 `
+  -Cpu 0.25 `
+  -Memory "0.5Gi" `
+  -NoCache
+```
+
+#### Deployment Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ResourceGroupName` | `rg-aztf-mcp-prod` | Azure Resource Group |
+| `Location` | `eastus` | Azure region |
+| `AcrName` | — | Azure Container Registry name |
+| `SubscriptionId` | — | Azure Subscription ID |
+| `ContainerAppName` | — | Container App name |
+| `LogAnalyticsWorkspace` | — | Log Analytics Workspace |
+| `ImageTag` | `latest` | Docker image tag |
+| `Port` | `8080` | Application port |
+| `Cpu` | `1.0` | CPU cores |
+| `Memory` | `2.0Gi` | Memory allocation |
+| `MinReplicas` | `1` | Minimum replicas |
+| `MaxReplicas` | `3` | Maximum replicas |
+| `SkipBuild` | `false` | Skip Docker build step |
+
+---
+
+## 4. Post-Deployment: Secrets & MCP URL Update
+
+> **IMPORTANT** — These steps must be done manually after every container deployment.
+
+### Step 1: Update Secrets in Container App
+
+After the container is deployed, go to the **Azure Portal** and update the secrets manually:
+
+1. Navigate to **Container Apps** → your app (e.g., `aztf-mcp-app`)
+2. Go to **Settings** → **Secrets**
+3. Copy the following values from your `.env` file and add/update them:
+
+| Secret Name | Source (.env key) |
+|-------------|-------------------|
+| `azure-client-secret` | `AZURE_CLIENT_SECRET` |
+| `github-token` | `GITHUB_TOKEN` |
+
+> Secrets are referenced in environment variables via `secretref:azure-client-secret`. The deploy script maps `AZURE_CLIENT_SECRET` and `ARM_CLIENT_SECRET` to this secret automatically.
+
+### Step 2: Get the Container App URL
+
+```bash
+# Get the FQDN of the deployed container app
+az containerapp show \
+  --name aztf-mcp-app \
+  --resource-group rg-mcp-servers \
+  --query properties.configuration.ingress.fqdn -o tsv
+```
+
+This will return something like:
+```
+aztf-mcp-app.livelyflower-5ea8a87a.centralus.azurecontainerapps.io
+```
+
+### Step 3: Update MCP URL in `.env`
+
+Update `MCP_SERVER_URL` in your `.env` file with the Container App URL:
+
+```bash
+MCP_SERVER_URL=https://aztf-mcp-app.<hash>.<region>.azurecontainerapps.io/
+```
+
+### Step 4: Update MCP URL in Azure AI Foundry Tool Connection
+
+Each Foundry Agent must have its **MCP SSE connection** pointed to the Container App URL:
+
+1. Open **Azure AI Foundry** portal
+2. Navigate to each agent:
+   - `aztf-assessment-v1`
+   - `aztf-export-v1`
+   - `aztf-coderefactor-v1`
+3. Go to **Tools** → **MCP (SSE)** connection
+4. Update the URL to:
+   ```
+   https://aztf-mcp-app.<hash>.<region>.azurecontainerapps.io/sse
+   ```
+
+### Managed Identity Permissions
+
+The Container App needs **System-Assigned Managed Identity** enabled with **Storage Blob Data Contributor** role:
+
+```bash
+az role assignment create \
+  --assignee $IDENTITY_PRINCIPAL_ID \
+  --role "Storage Blob Data Contributor" \
+  --scope /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/samcpstorage
+```
+
+---
+
+## 5. Azure AI Foundry Agent Setup
+
+### Required Foundry Resources
+
+1. An **Azure AI Foundry** project with a deployed model (e.g., `gpt-4o`)
+2. Four **Foundry Agents** created and connected to the MCP server tool set:
+
+| Agent Name | Purpose | MCP Tool |
+|-----------|---------|----------|
+| `aztf-orchestrator-v1` | NLP parameter extraction | — (direct LLM) |
+| `aztf-assessment-v1` | Azure resource assessment | `azure_assessment` |
+| `aztf-export-v1` | Terraform export (async) | `export_azure_terraform` |
+| `aztf-coderefactor-v1` | Code refactoring (async) | `refactor_terraform_code` |
+
+### Agent MCP Tool Configuration
+
+Each agent (except orchestrator) must have the **MCP SSE** connection configured:
+
+- **Connection Type**: MCP (Server-Sent Events)
+- **URL**: `https://<container-app-fqdn>/sse`
+
+### Required `.env` Variables for Foundry Workflow
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `AZURE_AI_PROJECT_ENDPOINT` | `https://<resource>.services.ai.azure.com/api/projects/<project>` | Foundry project endpoint |
+| `MCP_SERVER_URL` | `https://aztf-mcp-app.<hash>.<region>.azurecontainerapps.io/` | Container App base URL |
+| `AZURE_CLIENT_ID` | `4a7f6b45-...` | Service Principal App ID |
+| `AZURE_CLIENT_SECRET` | `skC8Q~...` | Service Principal secret |
+| `AZURE_TENANT_ID` | `a0e1f124-...` | Azure AD Tenant ID |
+
+---
+
+## 6. Running the Sequential Workflow
+
+The sequential workflow runs all four agents in order: Orchestrator → Assessment → Export → Refactor.
+
+```bash
+cd apps-mcp-server/python/az-fndry-workflow
+python aztf-sequential-wf.py
+```
+
+The workflow:
+1. Loads `.env` from its directory and the parent `apps-mcp-server/.env`
+2. Authenticates via Service Principal (`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`)
+3. Runs each agent sequentially via the Foundry SDK
+4. Polls `/jobs/:jobId` on the MCP server for async export/refactor completion
+5. Outputs results and artifact links
+
+### Local MCP Server Development
+
+For local testing without deployment, use the run script:
+
+```powershell
+# Start MCP server locally
+.\apps-mcp-server\mcpserver-run.ps1
+
+# With custom port
+.\apps-mcp-server\mcpserver-run.ps1 -Port 3000 -ShowDetails
+```
+
+---
+
+## 7. Agents & Workflow Details
+
+### 1. Migration Orchestrator Agent
+
+**Purpose**: Extracts and validates user migration requirements from natural language.
+
+- **Input**: User prompt (e.g., *"Migrate rg-app from sub-123"*)
+- **Output**:
+  ```json
+  {
+    "subscriptionId": "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2",
+    "resourceGroups": ["rg-app-dev", "rg-data-dev"],
+    "outPath": "/assessment"
+  }
+  ```
+
+### 2. Assessment Agent (`infraAzTfAssessmentAgent-v1`)
+
+**Purpose**: Performs managed-only Azure resource assessment.
+
+- Calls `azure_assessment` MCP tool
+- Generates HTML/PDF/XLSX reports
+- **Output**: Report artifacts uploaded to `assessment-reports/`
+
+### 3. Export Tool (`AztfExportPS-Tool`)
+
+**Purpose**: Exports Azure resources to Terraform HCL and tfstate.
+
+- Runs `aztfexport` via PowerShell
+- Handles authentication and temp file management
+- **Output**: `main.tf`, `provider.tf`, `terraform.tfstate` → `aztfexport/`
+
+### 4. Refactor Agent (`TerraformRefactor-Agent`)
+
+**Purpose**: Refactors exported code using naming standards and tagging rules.
+
+- Runs `refactor.py` → `tf_refactor_variable.py`
+- Enforces tags (owner, businessUnit, etc.)
+- Generates `variables.tf`, `terraform.tfvars`, `providers.tf`, `data-sources.tf`
+- Applies naming conventions from `naming-standard.json`
+- Does NOT add remote backend (preserves local state)
+- **Output**: Refactored `.tf` files → `code-refactored/`
+
+---
+
+## 8. API — Expose Workflow as REST (Pending)
+
+The sequential workflow will be exposed as a REST API using **FastAPI**, allowing the `ai-aztfexport-ui` frontend to trigger migration workflows via NLP prompts. Workflow state is tracked **in-memory** — no external database required.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/workflow/trigger` | Trigger workflow from NLP prompt |
+| `GET` | `/api/v1/workflow/{workflowId}` | Get workflow status |
+| `GET` | `/api/v1/workflows?userId=&limit=20` | List user workflows |
+| `GET` | `/health` | Health check |
+
+### Request Example
+
+```bash
+POST /api/v1/workflow/trigger
+{
+  "prompt": "Migrate resources in subscription d0f1884d-... resource group rg-prod-web to Terraform",
+  "userId": "user@company.com"
+}
+```
+
+### Running the API
+
+```bash
+cd apps-mcp-server/python
+pip install fastapi uvicorn pydantic
+uvicorn api.app:app --reload --port 8000
+```
+
+- **Swagger docs**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
+---
+
+## 9. GitHub Integration
+
+### Setup
+
+1. Generate a GitHub PAT with `repo` scope
+2. Update `.env` with `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`
+3. Set `OUTPUT_DESTINATION=github` or `both`
+
+### Security Features
+
+- **Branch Protection**: Uploads to specified branch
+- **.gitignore Generation**: Auto-excludes `terraform.tfstate`, `.terraform/`
+- **SHA Checking**: Avoids unnecessary commits by checking existing file SHAs
+
+---
+
+## 10. MCP Inspector & Debugging
+
+### Testing with MCP Inspector
+
+```bash
+# Install/run MCP Inspector
+npx @modelcontextprotocol/inspector
+
+# Test local server
+npx @modelcontextprotocol/inspector http://localhost:3000/sse
+
+# Test deployed container
+npx @modelcontextprotocol/inspector https://<container-app-fqdn>/sse
+```
+
+### Stop MCP Port
+
+```powershell
+netstat -ano | findstr :3000
+taskkill /PID <pid> /F
+```
+
+### View Container Logs
+
+```bash
 az containerapp logs show --name aztf-mcp-app --resource-group rg-mcp-servers --follow
-
-# Local
-# Output appears in terminal where node index.js is running
 ```
 
-### Foundry References 
-JSON RESPONSE - https://github.com/microsoft/agent-framework/blob/main/workflow-samples/CustomerSupport.yaml#L29
-https://learn.microsoft.com/en-us/power-platform/power-fx/working-with-json
-https://github.com/orgs/microsoft-foundry/discussions/218
-
 ---
-**Maintainer**: Sundeep K Maheshwari  
-**License**: MIT
+
+## 11. Troubleshooting & Fixes
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| `StorageAccount parameter is required` | Env vars not passed to spawned process | Ensure `tools/aztfexport.js` includes `env: { ...process.env }` |
+| Invalid JobId Parameter | Old PS script expected `-JobId` | Updated — uses `{SubscriptionId}/{ResourceGroup}` path |
+| SSE Disconnects | MCP SDK or proxy issues | Use Stdio mode for production; ensure client auto-reconnects |
+| GitHub Upload 403/404 | Token scope or repo name | Verify PAT has `repo` scope; check `GITHUB_OWNER` |
+| `SecretRef not found` | Secret not set in Container App | Manually add secret via Azure Portal (see Section 4) |
+| `variables.tf` empty | Refactor engine bug — empty lookup dicts | Fixed in `tf_refactor_variable.py` (populate from variables OrderedDict) |
+
+### Foundry References
+
+- [Agent Framework Workflow Samples](https://github.com/microsoft/agent-framework/blob/main/workflow-samples/CustomerSupport.yaml#L29)
+- [Power Fx JSON](https://learn.microsoft.com/en-us/power-platform/power-fx/working-with-json)
+- [Foundry Discussions](https://github.com/orgs/microsoft-foundry/discussions/218)
 
