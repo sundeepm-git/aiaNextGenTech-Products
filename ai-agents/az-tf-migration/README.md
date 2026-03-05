@@ -26,11 +26,16 @@
 
 ### Architecture Diagram
 
-![System Architecture](apps-mcp-server/Architecture-Diagram.png)
+![System Architecture](apps-mcp-server/ArchitectureDiagram.png)
 
 > Source Visio file: [Architecture.vsdx](Architecture.vsdx)
 
 ### Sequence Diagram — Agent Workflow
+
+![Sequence Diagram](apps-mcp-server/Sequence%20Diagram.png)
+
+<details>
+<summary>Mermaid source (click to expand)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -72,48 +77,15 @@ sequenceDiagram
     Orchestrator-->>User: Final results & artifact links
 ```
 
-### High-Level Component Diagram
+</details>
 
-```mermaid
-flowchart TB
-    subgraph "Agentic AI Layer"
-        LLM["LLM (GPT-4o)"]
-        Orch["Orchestrator Agent"]
-        Assess["Assessment Agent"]
-        Export["Export Agent"]
-        Refactor["Refactor Agent"]
-    end
 
-    subgraph "MCP Tooling Layer"
-        MCPServer["MCP Server — Azure Container App"]
-        T1["azure_assessment"]
-        T2["export_azure_terraform"]
-        T3["refactor_terraform_code"]
-    end
-
-    subgraph "Azure Platform Layer"
-        Sub["Azure Subscription"]
-        RG["Resource Group"]
-        Blob["Azure Storage Account"]
-        GH["GitHub Repo"]
-    end
-
-    LLM --> Orch
-    Orch --> Assess --> MCPServer
-    Orch --> Export --> MCPServer
-    Orch --> Refactor --> MCPServer
-    MCPServer --> T1 & T2 & T3
-    T1 & T2 --> Sub & RG
-    T3 --> Blob
-    T1 & T2 & T3 --> Blob
-    T1 & T2 & T3 -.-> GH
-```
 
 ### Directory Structure
 
 ```
 apps-mcp-server/
-├── index.js                    # Main MCP server entry & SSE logic
+├── index.js                    # NODE JS Main MCP server entry & SSE logic
 ├── Dockerfile                  # Container image definition
 ├── deploy.ps1                  # End-to-end Azure deployment script
 ├── .env                        # Environment configuration (DO NOT COMMIT)
@@ -121,11 +93,9 @@ apps-mcp-server/
 │   ├── assessment.js
 │   ├── aztfexport.js
 │   └── code-refactor.js
-├── ps/                         # PowerShell scripts
-│   ├── assessment-AzSubscription.ps1
-│   ├── Export-AzToTerraform.ps1
-│   └── GitHubHelper.psm1
 ├── python/                     # Python engines & workflow
+│   ├── assessment-AzSubscription.py  # Azure resource assessment engine
+│   ├── Export-Container-AzToTerraform.py  # Terraform export engine
 │   ├── refactor.py             # Refactor entry point
 │   ├── tf_refactor_variable.py # Refactoring logic
 │   ├── github_helper.py        # GitHub API integration
@@ -328,8 +298,10 @@ The `deploy.ps1` script handles everything end-to-end: ACR creation, Docker buil
 
 After the container is deployed, go to the **Azure Portal** and update the secrets manually:
 
+
+
 1. Navigate to **Container Apps** → your app (e.g., `aztf-mcp-app`)
-2. Go to **Settings** → **Secrets**
+2. Go to **Environment Settings** → **Secrets** (Will Do This AUtomation in future)
 3. Copy the following values from your `.env` file and add/update them:
 
 | Secret Name | Source (.env key) |

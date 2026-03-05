@@ -169,19 +169,6 @@ function Write-Fail {
     Write-Host "✗ $Message" -ForegroundColor Red
 }
 
-function Get-UniqueAcrName {
-    <#
-    .SYNOPSIS
-        Generates a unique Azure Container Registry name
-    .DESCRIPTION
-        ACR names must be globally unique. This function appends a random
-        4-digit suffix to ensure uniqueness across Azure.
-    #>
-    param([string]$BaseName = "acraztfmcp")
-    $randomSuffix = Get-Random -Minimum 1000 -Maximum 9999
-    return "$BaseName$randomSuffix"
-}
-
 function Wait-ForDeployment {
     <#
     .SYNOPSIS
@@ -203,19 +190,15 @@ function Wait-ForDeployment {
     Write-Host ""
 }
 
-# Generate ACR name if not provided
-if (-not $AcrName) {
-    $AcrName = Get-UniqueAcrName
-}
-
-Write-Host "DEBUG: Using ACR: $AcrName"
-
 # ===========================
 # LOAD .ENV VARIABLES
 # ===========================
-if (Test-Path ".env") {
+# Load ALL key variables from .env so deploy.ps1 works without passing every parameter
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
     Write-Info "Found .env file. Loading variables..."
-    foreach ($line in Get-Content ".env") {
+    $envVarsLoaded = @()
+    foreach ($line in Get-Content $envFile) {
         # Skip comments and empty lines
         if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
         
@@ -223,18 +206,49 @@ if (Test-Path ".env") {
         $parts = $line -split '=', 2
         if ($parts.Count -eq 2) {
             $envName = $parts[0].Trim()
-            $envValue = $parts[1].Trim().Trim('"', "'") # Remove extra spaces or quotes
-            
-            # Assign to $ClientSecret if it's found in the .env file
-            if ($envName -eq "AZURE_CLIENT_SECRET" -and [string]::IsNullOrEmpty($ClientSecret)) {
-                $ClientSecret = $envValue
-                Write-Info "Successfully loaded AZURE_CLIENT_SECRET from .env file"
+            $envValue = $parts[1].Trim().Trim('"', "'").Trim()
+            # Strip inline comments (e.g., "value # comment")
+            if ($envValue -match '^([^#]+?)\s*#') { $envValue = $Matches[1].Trim() }
+
+            switch ($envName) {
+                "AZURE_CLIENT_SECRET" { if (-not $ClientSecret) { $ClientSecret = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_CLIENT_ID"     { if (-not $ClientId)     { $ClientId     = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_TENANT_ID"     { if (-not $TenantId)     { $TenantId     = $envValue; $envVarsLoaded += $envName } }
+                "storageAccount"      { if (-not $StorageAccountName) { $StorageAccountName = $envValue; $envVarsLoaded += $envName } }
+                "storageAccountRG"    { if (-not $ResourceGroupName -or $ResourceGroupName -eq "rg-aztf-mcp") { $ResourceGroupName = $envValue; $ResourceGroup = $envValue; $envVarsLoaded += $envName } }
+                "containerName"       { if (-not $ContainerName) { $ContainerName = $envValue; $envVarsLoaded += $envName } }
+                "OUTPUT_DESTINATION"  { $script:OutputDestination = $envValue; $envVarsLoaded += $envName }
+                "GITHUB_TOKEN"        { $script:GitHubToken = $envValue; $envVarsLoaded += $envName }
+                "GITHUB_OWNER"        { $script:GitHubOwner = $envValue; $envVarsLoaded += $envName }
+                "GITHUB_REPO"         { $script:GitHubRepo  = $envValue; $envVarsLoaded += $envName }
+                "GITHUB_BRANCH"       { $script:GitHubBranch = $envValue; $envVarsLoaded += $envName }
+                "AZTFEXPORT_FOLDER"   { $script:AztfexportFolder = $envValue; $envVarsLoaded += $envName }
+                "CODE_REFACTORED_FOLDER" { $script:CodeRefactoredFolder = $envValue; $envVarsLoaded += $envName }
+                "ASSESSMENT_FOLDER"   { $script:AssessmentFolder = $envValue; $envVarsLoaded += $envName }
             }
         }
+    }
+    if ($envVarsLoaded.Count -gt 0) {
+        Write-Success "Loaded $($envVarsLoaded.Count) variables from .env: $($envVarsLoaded -join ', ')"
     }
 } else {
     Write-Info "No .env file found. Relying on script parameters."
 }
+
+# Resolve ACR name — use existing ACR in the resource group instead of generating a random one
+if (-not $AcrName) {
+    Write-Info "No ACR name provided — looking up existing ACR in resource group $ResourceGroup..."
+    $existingAcr = az acr list --resource-group $ResourceGroup --query "[0].name" -o tsv 2>$null
+    if ($existingAcr) {
+        $AcrName = $existingAcr
+        Write-Success "Found existing ACR: $AcrName"
+    } else {
+        $AcrName = "aztfmcpacr"
+        Write-Warning "No existing ACR found — will create: $AcrName"
+    }
+}
+
+Write-Info "Using ACR: $AcrName"
 
 # ===========================
 # START DEPLOYMENT
@@ -383,18 +397,29 @@ $envExists = az containerapp env show `
 
 if (-not $envExists) {
     Write-Info "Creating Container Apps Environment: $ContainerAppEnv"
-    az containerapp env create `
-        --name $ContainerAppEnv `
-        --resource-group $ResourceGroup `
-        --location $Location `
-        --logs-workspace-id $LAW_ID `
-        --logs-workspace-key $LAW_KEY `
-        --output none
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Container Apps Environment created"
-    } else {
-        Write-Fail "Failed to create Container Apps Environment"
+    $maxAttempts = 3
+    $attempt = 1
+    $created = $false
+    while ($attempt -le $maxAttempts -and -not $created) {
+        Write-Info "Attempt $attempt of $maxAttempts to create Container Apps Environment..."
+        az containerapp env create `
+            --name $ContainerAppEnv `
+            --resource-group $ResourceGroup `
+            --location $Location `
+            --logs-workspace-id $LAW_ID `
+            --logs-workspace-key $LAW_KEY `
+            --output none
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Container Apps Environment created"
+            $created = $true
+        } else {
+            Write-Warning "Attempt $attempt failed to create Container Apps Environment. Retrying in 20 seconds..."
+            Start-Sleep -Seconds 20
+            $attempt++
+        }
+    }
+    if (-not $created) {
+        Write-Fail "Failed to create Container Apps Environment after $maxAttempts attempts. Check Azure Portal for partial resources or try again later."
         exit 1
     }
 } else {
@@ -525,45 +550,60 @@ Write-Success "Image pushed in $([math]::Round($pushDuration, 1)) seconds"
 
 Write-Step "Deploying Container App" "Magenta"
 
-# Build environment variables array
+# Build environment variables array — include ALL vars the container needs
 $envVars = @(
     "PORT=$Port"
     "LOG_LEVEL=$LogLevel"
     "NODE_ENV=$NodeEnv"
+    "PYTHONUNBUFFERED=1"
+    "RUNNING_IN_CONTAINER=true"
 )
 
-# Add storage account if provided
+# Azure Storage configuration
 if ($StorageAccountName) {
     $envVars += "AZURE_STORAGE_ACCOUNT=$StorageAccountName"
     $envVars += "storageAccount=$StorageAccountName"
 }
-
-# Add storage container if provided
 if ($ContainerName) {
     $envVars += "AZURE_STORAGE_CONTAINER=$ContainerName"
 }
+$storageRG = if ($ResourceGroup) { $ResourceGroup } else { "rg-mcp-servers" }
+$envVars += "storageAccountRG=$storageRG"
 
-# Add SPN credentials if provided
+# Azure SPN credentials
 if ($SubscriptionId) {
     $envVars += "AZURE_SUBSCRIPTION_ID=$SubscriptionId"
     $envVars += "ARM_SUBSCRIPTION_ID=$SubscriptionId"
 }
-
 if ($TenantId) {
     $envVars += "AZURE_TENANT_ID=$TenantId"
     $envVars += "ARM_TENANT_ID=$TenantId"
 }
-
 if ($ClientId) {
     $envVars += "AZURE_CLIENT_ID=$ClientId"
     $envVars += "ARM_CLIENT_ID=$ClientId"
 }
-
-# Only map the secret to environment variables if the secret was found
 if ($ClientSecret) {
     $envVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
     $envVars += "ARM_CLIENT_SECRET=secretref:azure-client-secret"
 }
+
+# GitHub configuration (for OUTPUT_DESTINATION=github or both)
+if ($script:GitHubToken)  { $envVars += "GITHUB_TOKEN=$($script:GitHubToken)" }
+if ($script:GitHubOwner)  { $envVars += "GITHUB_OWNER=$($script:GitHubOwner)" }
+if ($script:GitHubRepo)   { $envVars += "GITHUB_REPO=$($script:GitHubRepo)" }
+if ($script:GitHubBranch) { $envVars += "GITHUB_BRANCH=$($script:GitHubBranch)" }
+
+# Output destination and folder configuration
+if ($script:OutputDestination)  { $envVars += "OUTPUT_DESTINATION=$($script:OutputDestination)" }
+if ($script:AztfexportFolder)   { $envVars += "AZTFEXPORT_FOLDER=$($script:AztfexportFolder)" }
+if ($script:CodeRefactoredFolder) { $envVars += "CODE_REFACTORED_FOLDER=$($script:CodeRefactoredFolder)" }
+if ($script:AssessmentFolder)   { $envVars += "ASSESSMENT_FOLDER=$($script:AssessmentFolder)" }
+
+# Script paths inside the container
+$envVars += "REFACTOR_SCRIPT_PATH=./python/refactor.py"
+$envVars += "EXPORT_SCRIPT_PATH=./python/Export-Container-AzToTerraform.py"
+$envVars += "EXECUTION_MODE=container"
 
 Write-Info "Configured environment variables:"
 foreach ($envVar in $envVars) {
@@ -743,12 +783,7 @@ try {
     Write-Info "  Version: $($health.version)"
     Write-Info "  Status: $($health.status)"
     Write-Info "  Blob Storage: $($health.blobStorage.available)"
-    
-    if ($health.version -eq "2.1.0") {
-        Write-Success "✓ Running latest version (2.1.0)"
-    } else {
-        Write-Warning "Version mismatch - expected 2.1.0, got $($health.version)"
-    }
+    Write-Success "Running version $($health.version)"
 } catch {
     Write-Fail "Health check failed: $_"
     

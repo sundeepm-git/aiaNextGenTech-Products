@@ -129,6 +129,7 @@ class TerraformRefactorEngine:
         'timezone': 'tz',
         'platform_fault_domain_count': 'pfdc',
     }
+
     def _generate_html_report(self):
         """
         Generate CodeRefactor-Report.html with validation checklist, file status, and summary.
@@ -137,7 +138,7 @@ class TerraformRefactorEngine:
         import re
         from datetime import datetime
         from collections import defaultdict
-        
+
         html_path = self.output_dir / "CodeRefactor-Report.html"
         now = datetime.now()
         date_str = now.strftime('%Y-%m-%d')
@@ -368,7 +369,7 @@ class TerraformRefactorEngine:
 '''
         html_path.write_text(html, encoding='utf-8')
         self._print_step("Generated CodeRefactor-Report.html with enhanced analysis", "green")
-    
+
     def _print_step(self, msg, color="green"):
         colors = {
             "green": "\033[92m",
@@ -899,7 +900,18 @@ crash.log
         try:
             parsed_files, failed_files = self.loader.load()
             self.failed_resources.update(failed_files)
+            print(f"[DEBUG] Loader returned {len(parsed_files)} parsed files, source_dir={self.source_dir}")
+            for k in parsed_files.keys():
+                print(f"[DEBUG]   parsed key: {k}  startswith(source_dir)={k.startswith(str(self.source_dir))}  endswith(.tf)={k.endswith('.tf')}")
             self.hcl_data = {k: v for k, v in parsed_files.items() if k.startswith(str(self.source_dir)) and k.endswith('.tf')}
+            print(f"[DEBUG] hcl_data after filter: {len(self.hcl_data)} files")
+            if not self.hcl_data and parsed_files:
+                # Fallback: try case-insensitive / normalized path matching
+                norm_source = str(self.source_dir).replace('\\', '/').lower()
+                self.hcl_data = {k: v for k, v in parsed_files.items() 
+                                 if k.replace('\\', '/').lower().startswith(norm_source) and k.endswith('.tf')}
+                if self.hcl_data:
+                    print(f"[DEBUG] Path normalization fallback matched {len(self.hcl_data)} files")
         except Exception as e:
             print(f"[ERROR] Loading/parsing failed: {e}")
             self.failed_resources['__loader__'] = str(e)
@@ -1004,28 +1016,26 @@ crash.log
             self.writers.tfvars = tfvars_content
             tfvars_path = self.output_dir / "terraform.tfvars"
             with open(tfvars_path, "w") as f:
-                f.write("# Auto-generated via Enterprise Terraform Refactoring Engine\n\n")
                 f.write("\n\n".join(self.writers.tfvars))
         except Exception as e:
             print(f"[ERROR] Writing tfvars file failed: {e}")
 
         # (terraform CLI command execution removed)
 
-        # Write summary and error reports
-        self._write_summary_report()
-        if self.failed_resources:
-            self._write_failed_report()
-        
         # Create .gitignore file to protect sensitive files
         self._create_gitignore()
         
         # Step: Generate and update terraform.tfvars before upload
         self._generate_tfvars()
         
-        # Final Step: Upload to configured destination (Azure or GitHub or both)
-        # Final Step: Generate HTML report, then upload to destination
+        # Generate HTML report
         try:
             self._generate_html_report()
+        except Exception as e:
+            print(f"[ERROR] HTML report generation failed: {e}")
+
+        # Final Step: Upload to configured destination (Azure or GitHub or both)
+        try:
             if self.output_destination == 'github':
                 self._print_step("=== Final Step: Uploading to GitHub ===", "blue")
                 self._upload_to_github()
@@ -1049,119 +1059,6 @@ crash.log
         finally:
             # Always cleanup temp directories
             self._cleanup_temp_dirs()
-
-    def _write_summary_report(self):
-        report_path = self.output_dir / "REPORT.md"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        lines = []
-        lines.append("# Refactor Summary Report\n\n")
-        lines.append(f"**Subscription:** {self.subscription_name}\n\n")
-        lines.append(f"**Resource Group:** {self.resource_group_name}\n\n")
-        lines.append("## Processed Files\n")
-        for fname in sorted(self.hcl_data.keys()):
-            lines.append(f"- {fname}\n")
-
-        # One-to-one mapping table with reasons
-        lines.append("\n## Variable Mapping Table\n")
-        var_names = set()
-        tfvars_names = set()
-        main_vars = set()
-        var_comments = {}
-        tfvars_comments = {}
-        # variables.tf
-        for var_block in self.writers.variables_tf:
-            m = re.match(r'# Variable: ([^\n]+)\n# Used in main.tf as var\.([a-zA-Z0-9_]+)', var_block)
-            if m:
-                var_names.add(m.group(1))
-                var_comments[m.group(1)] = m.group(2)
-        # terraform.tfvars
-        for line in self.writers.tfvars:
-            m = re.match(r'# ([a-zA-Z0-9_]+) maps to variable ([a-zA-Z0-9_]+)', line)
-            if m:
-                tfvars_names.add(m.group(1))
-                tfvars_comments[m.group(1)] = m.group(2)
-        # main.tf
-        # Use cleaned main.tf if available
-        cleaned_main_tf_path = self.output_dir / "main.cleaned.tf"
-        if cleaned_main_tf_path.exists():
-            main_tf_path = cleaned_main_tf_path
-        else:
-            main_tf_path = self.output_dir / "main.tf"
-        if main_tf_path.exists():
-            with open(main_tf_path, "r") as f:
-                main_content = f.read()
-            main_vars.update(re.findall(r'var\.([a-zA-Z0-9_]+)', main_content))
-        all_vars = sorted(var_names | tfvars_names | main_vars)
-        lines.append("| Variable | variables.tf | terraform.tfvars | main.tf | Reason |\n")
-        lines.append("|----------|-------------|------------------|---------|--------|\n")
-        for v in all_vars:
-            included = []
-            reason = ""
-            if v in var_names and v in tfvars_names and v in main_vars:
-                included = ["Y", "Y", "Y"]
-                reason = "Mapped 1:1 in all files"
-            elif v in var_names and v in tfvars_names:
-                included = ["Y", "Y", ""]
-                reason = "Declared and assigned, not referenced in main.tf"
-            elif v in var_names and v in main_vars:
-                included = ["Y", "", "Y"]
-                reason = "Declared and referenced, not assigned in tfvars"
-            elif v in tfvars_names and v in main_vars:
-                included = ["", "Y", "Y"]
-                reason = "Assigned and referenced, not declared in variables.tf"
-            elif v in var_names:
-                included = ["Y", "", ""]
-                reason = "Declared only"
-            elif v in tfvars_names:
-                included = ["", "Y", ""]
-                reason = "Assigned only"
-            elif v in main_vars:
-                included = ["", "", "Y"]
-                reason = "Referenced only"
-            else:
-                included = ["", "", ""]
-                reason = "Not included"
-            lines.append(f"| {v} | {included[0]} | {included[1]} | {included[2]} | {reason} |\n")
-
-        # Excluded data blocks
-        if hasattr(self, 'excluded_data_vars') and self.excluded_data_vars:
-            lines.append("\n## Excluded Data Blocks\n")
-            for dblock, dvars in self.excluded_data_vars.items():
-                lines.append(f"- {dblock}: {', '.join(dvars)}\n")
-        # Omitted variables from tfvars
-        if hasattr(self, 'omitted_tfvars_reasons') and self.omitted_tfvars_reasons:
-            lines.append("\n## Omitted Variables from terraform.tfvars\n")
-            for var, reason in self.omitted_tfvars_reasons:
-                lines.append(f"- {var}: {reason}\n")
-        # Omitted hardcoded values from main.tf
-        if hasattr(self, 'omitted_main_hardcoded_reasons') and self.omitted_main_hardcoded_reasons:
-            lines.append("\n## Omitted Hardcoded Values from main.tf\n")
-            for var, reason in self.omitted_main_hardcoded_reasons:
-                lines.append(f"- {var}: {reason}\n")
-        if self.failed_resources:
-            lines.append("\n## Failed Resources\n")
-            for res, err in self.failed_resources.items():
-                lines.append(f"- **{res}**: {err}\n")
-        else:
-            lines.append("\nNo failed resources.\n")
-        # Check for drift report
-        drift_report = self.output_dir / "DRIFT_REPORT.md"
-        if drift_report.exists():
-            lines.append("\n## Drift Detected\nSee DRIFT_REPORT.md for details.\n")
-        else:
-            lines.append("\nNo drift detected.\n")
-        with open(report_path, "w") as f:
-            f.writelines(lines)
-
-    def _write_failed_report(self):
-        report_path = self.output_dir / "FAILED_RESOURCES_REPORT.md"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        with open(report_path, "w") as f:
-            f.write("# Failed Resources Report\n\n")
-            for res, err in self.failed_resources.items():
-                f.write(f"- **{res}**: {err}\n")
-
-        self.hcl_data = {}
 
     def log(self, msg):
         if self.verbose:
@@ -1526,15 +1423,21 @@ crash.log
                     resource_groups.setdefault(group_label, []).append(var_name)
 
         # Walk parsed HCL for all resource blocks
+        print(f"[DEBUG] generate_variables_tf: hcl_data has {len(self.hcl_data)} files")
         for filename, parsed in self.hcl_data.items():
             fname = Path(filename).name
+            print(f"[DEBUG]   file: {fname}, keys: {list(parsed.keys()) if parsed else 'None'}")
             if fname == 'main.tf':
-                for block in parsed.get('resource', []):
+                resource_blocks = parsed.get('resource', [])
+                print(f"[DEBUG]   main.tf has {len(resource_blocks)} resource block groups")
+                for block in resource_blocks:
                     for rtype, resources in block.items():
                         for rname, attrs in resources.items():
+                            print(f"[DEBUG]     resource: {rtype}.{rname} — {len(attrs)} attributes")
                             # rname is the resource instance string (e.g., res_3)
                             group_label = to_snake(f"{rtype}_{rname}")
                             extract_from_dict(attrs, group_label, parent_keys=[rname], rtype=rtype, rname=rname)
+        print(f"[DEBUG] generate_variables_tf: extracted {len(variables)} variables from HCL")
 
         # Compose variables.tf in grouped, formatted blocks
         # Populate descriptions, types, defaults, and sensitive from the variables OrderedDict
@@ -1552,11 +1455,16 @@ crash.log
 
         # Generate variables.tf content
         var_blocks = []
+        skipped_vars = []
         for var_name in variables:
-            # Skip provider/data-sourced/computed fields, IDs, self-links, URIs, or environment-specific names
-            if any(x in var_name for x in ["id", "self_link", "uri"]):
+            # Skip ID fields (suffix match only), self-links, URIs, or environment-specific names
+            if (var_name.endswith('_id') or var_name.endswith('_ids') or
+                var_name == 'id' or var_name == 'ids' or '_id_' in var_name or
+                'self_link' in var_name or 'uri' in var_name):
+                skipped_vars.append((var_name, 'id/self_link/uri'))
                 continue
-            if re.search(r'(prod|dev|qa|test|stage)', var_name):
+            if re.search(r'(?:^|_)(prod|dev|qa|test|stage)(?:$|_)', var_name):
+                skipped_vars.append((var_name, 'env-specific'))
                 continue
             type_val = types[var_name]
             # Use strict types for objects/maps/lists
@@ -1634,7 +1542,15 @@ crash.log
         self.variables_alignment_result = alignment
         self.variables_alignment_message = f"Variables alignment: {alignment}. main.tf variables: {len(main_tf_vars)}, variables.tf: {len(var_names_in_tf)}"
         print(self.variables_alignment_message)
-        self.log(f"Populating variables.tf with {len(var_blocks)} variable blocks.")
+        self.log(f"Populating variables.tf with {len(var_blocks)} variable blocks (skipped {len(skipped_vars)}).")
+        print(f"[DEBUG] generate_variables_tf: {len(variables)} extracted, {len(var_blocks)} emitted, {len(skipped_vars)} skipped")
+        if skipped_vars:
+            for sname, sreason in skipped_vars[:10]:
+                print(f"[DEBUG]   skipped: {sname} ({sreason})")
+        if not var_blocks:
+            print(f"[WARNING] No variable blocks generated! variables dict has {len(variables)} entries.")
+            for vn in list(variables.keys())[:10]:
+                print(f"[DEBUG]   variable entry: {vn}")
         self.writers.variables_tf = var_blocks
 
     def generate_tfvars(self):
@@ -1663,11 +1579,11 @@ crash.log
             match = re.match(r'variable "([^"]+)"', var_block)
             if match:
                 var_name = match.group(1)
-                # Exclude *_id, *_ids, ARM IDs
+                # Exclude *_id, *_ids, ARM IDs (suffix match only)
                 if (
                     var_name.endswith('_id') or var_name.endswith('_ids') or
                     var_name == 'id' or var_name == 'ids' or
-                    re.match(r'.*id(s)?$', var_name)
+                    '_id_' in var_name
                 ):
                     continue
                 # Check for sensitive attribute
