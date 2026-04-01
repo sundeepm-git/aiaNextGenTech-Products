@@ -1,0 +1,10 @@
+python-dotenv
+feedparser
+edge-tts
+moviepy
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+requests
+fastapi
+uvicorn[standard]

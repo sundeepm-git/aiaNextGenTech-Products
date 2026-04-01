@@ -211,9 +211,10 @@ if (Test-Path $envFile) {
             if ($envValue -match '^([^#]+?)\s*#') { $envValue = $Matches[1].Trim() }
 
             switch ($envName) {
-                "AZURE_CLIENT_SECRET" { if (-not $ClientSecret) { $ClientSecret = $envValue; $envVarsLoaded += $envName } }
-                "AZURE_CLIENT_ID"     { if (-not $ClientId)     { $ClientId     = $envValue; $envVarsLoaded += $envName } }
-                "AZURE_TENANT_ID"     { if (-not $TenantId)     { $TenantId     = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_CLIENT_SECRET"    { if (-not $ClientSecret)    { $ClientSecret    = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_CLIENT_ID"        { if (-not $ClientId)        { $ClientId        = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_TENANT_ID"        { if (-not $TenantId)        { $TenantId        = $envValue; $envVarsLoaded += $envName } }
+                "AZURE_SUBSCRIPTION_ID"  { if (-not $SubscriptionId)  { $SubscriptionId  = $envValue; $envVarsLoaded += $envName } }
                 "storageAccount"      { if (-not $StorageAccountName) { $StorageAccountName = $envValue; $envVarsLoaded += $envName } }
                 "storageAccountRG"    { if (-not $ResourceGroupName -or $ResourceGroupName -eq "rg-aztf-mcp") { $ResourceGroupName = $envValue; $ResourceGroup = $envValue; $envVarsLoaded += $envName } }
                 "containerName"       { if (-not $ContainerName) { $ContainerName = $envValue; $envVarsLoaded += $envName } }

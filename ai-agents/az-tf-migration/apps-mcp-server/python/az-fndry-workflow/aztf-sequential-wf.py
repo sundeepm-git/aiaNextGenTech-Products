@@ -372,7 +372,12 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
                         # Export succeeded — .tf files are now in Azure Storage, ready for refactor
                         UI.log("EXPORT POLL", UI.GREEN, "Export job finished — files uploaded to storage ✅")
                     elif job_result and job_result.get("status") == "failed":
-                        UI.log("EXPORT POLL", UI.RED, f"Export job FAILED: {job_result.get('error', 'unknown')}")
+                        error_detail = job_result.get('error', 'unknown')
+                        UI.log("EXPORT POLL", UI.RED, f"Export job FAILED")
+                        # Print full error without truncation
+                        print(f"{UI.RED}{UI.BOLD}[FULL ERROR     ]:{UI.END}")
+                        print(f"{error_detail}")
+                        print(f"{UI.RED}{'─' * 100}{UI.END}")
                         export_out = None  # Mark as failed so the refactor step is skipped
                     else:
                         # Timed out or unknown status — treat as failure
@@ -411,7 +416,12 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
                         # Refactor succeeded — clean code is now in Azure Storage
                         UI.log("REFACTOR POLL", UI.GREEN, "Refactor job finished — code uploaded to storage ✅")
                     elif job_result and job_result.get("status") == "failed":
-                        UI.log("REFACTOR POLL", UI.RED, f"Refactor job FAILED: {job_result.get('error', 'unknown')}")
+                        error_detail = job_result.get('error', 'unknown')
+                        UI.log("REFACTOR POLL", UI.RED, f"Refactor job FAILED")
+                        # Print full error without truncation
+                        print(f"{UI.RED}{UI.BOLD}[FULL ERROR     ]:{UI.END}")
+                        print(f"{error_detail}")
+                        print(f"{UI.RED}{'─' * 100}{UI.END}")
                         final_out = "REFACTOR_FAILED"
                     else:
                         UI.log("REFACTOR POLL", UI.RED, f"Refactor job did not complete (status: {job_result.get('status') if job_result else 'timeout'})")

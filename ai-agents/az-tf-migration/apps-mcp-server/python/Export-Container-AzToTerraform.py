@@ -225,15 +225,26 @@ def upload_and_push(export_dir, sub_id, rg_name):
     # 1. Storage Upload
     storage_account = os.getenv("storageAccount")
     container = os.getenv("AZURE_STORAGE_CONTAINER", "aztfexport")
+    upload_success = False
+    
     if storage_account:
         print(f"INFO: Attempting upload to Storage Account: {storage_account}...")
         try:
             res = subprocess.run([AZ_CLI, "storage", "blob", "upload-batch", "--account-name", storage_account, "--destination", container, "--source", str(export_dir), "--destination-path", f"{sub_id}/{rg_name}", "--overwrite", "true", "--auth-mode", "login"], capture_output=True, text=True)
             if res.returncode == 0:
                 print(f"SUCCESS: Files pushed to Storage Account '{storage_account}'.")
+                upload_success = True
             else:
                 print(f"ERROR: Storage upload failed. Check permissions for '{storage_account}'.")
-        except Exception as e: print(f"ERROR: Storage operation failed: {e}")
+                print(f"ERROR: stdout: {res.stdout}")
+                print(f"ERROR: stderr: {res.stderr}")
+                sys.exit(1)  # Exit with error code to mark job as failed
+        except Exception as e: 
+            print(f"ERROR: Storage operation failed: {e}")
+            sys.exit(1)  # Exit with error code to mark job as failed
+    else:
+        print(f"WARNING: storageAccount not configured in environment - skipping upload")
+        # Still consider it success if no storage account is configured
 
     # 2. GitHub Push
     token = os.getenv("GITHUB_TOKEN")
@@ -242,18 +253,20 @@ def upload_and_push(export_dir, sub_id, rg_name):
         print("INFO: Attempting push to GitHub...")
         auth_url = repo_url.replace("https://", f"https://{token}@")
         try:
-            subprocess.run(["git", "init"], cwd=export_dir, capture_output=True)
-            subprocess.run(["git", "config", "user.name", "Export-Bot"], cwd=export_dir)
-            subprocess.run(["git", "config", "user.email", "bot@mcp.local"], cwd=export_dir)
-            subprocess.run(["git", "remote", "add", "origin", auth_url], cwd=export_dir)
-            subprocess.run(["git", "add", "."], cwd=export_dir)
-            subprocess.run(["git", "commit", "-m", f"Auto-export: {rg_name}"], cwd=export_dir)
-            push_res = subprocess.run(["git", "push", "-u", "origin", "master", "--force"], cwd=export_dir, capture_output=True, text=True)
-            if push_res.returncode == 0:
-                print(f"SUCCESS: Code pushed to GitHub: {repo_url}")
-            else:
-                print(f"ERROR: GitHub push failed. Verify GITHUB_TOKEN.")
-        except Exception as e: print(f"ERROR: GitHub operation failed: {e}")
+            subprocess.run(["git", "init"], cwd=export_dir, capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.name", "Export-Bot"], cwd=export_dir, check=True)
+            subprocess.run(["git", "config", "user.email", "bot@mcp.local"], cwd=export_dir, check=True)
+            subprocess.run(["git", "remote", "add", "origin", auth_url], cwd=export_dir, check=True)
+            subprocess.run(["git", "add", "."], cwd=export_dir, check=True)
+            subprocess.run(["git", "commit", "-m", f"Auto-export: {rg_name}"], cwd=export_dir, check=True)
+            push_res = subprocess.run(["git", "push", "-u", "origin", "master", "--force"], cwd=export_dir, capture_output=True, text=True, check=True)
+            print(f"SUCCESS: Code pushed to GitHub: {repo_url}")
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: GitHub push failed. Verify GITHUB_TOKEN.")
+            print(f"ERROR: {e}")
+            # Don't fail the entire job for GitHub issues if storage upload succeeded
+            if not upload_success:
+                sys.exit(1)
 
 def main():
 

@@ -34,15 +34,21 @@ def ensure_azure_spn_login():
     # Check if already logged in
     try:
         result = subprocess.run([AZ_PATH, 'account', 'show', '--output', 'json'], capture_output=True, text=True, check=True)
-        # Optionally, check if the logged-in user is the SPN
+        # Optionally, check if the logged-in user is the SPN or managed identity
         account = json.loads(result.stdout)
-        if account.get('user', {}).get('type') == 'servicePrincipal':
-            return  # Already logged in as SPN
+        if account.get('user', {}).get('type') in ['servicePrincipal', 'managedIdentity']:
+            return  # Already logged in as SPN or managed identity
     except Exception:
         pass
-    # Not logged in or not as SPN, try SPN login
+    # Not logged in, try managed identity first (for Azure Container Apps)
+    print("Attempting Azure CLI login with managed identity...", flush=True)
+    result = subprocess.run([AZ_PATH, 'login', '--identity'], capture_output=True, text=True)
+    if result.returncode == 0:
+        print("Azure CLI managed identity login successful.", flush=True)
+        return
+    # Managed identity failed, try SPN login
     if client_id and client_secret and tenant_id:
-        print("Logging in to Azure CLI using Service Principal...", flush=True)
+        print("Managed identity not available. Logging in to Azure CLI using Service Principal...", flush=True)
         login_cmd = [
             AZ_PATH, 'login', '--service-principal',
             '-u', client_id, '-p', client_secret, '--tenant', tenant_id
@@ -54,8 +60,8 @@ def ensure_azure_spn_login():
             sys.exit(1)
         print("Azure CLI SPN login successful.", flush=True)
     else:
-        print("ERROR: Not logged in to Azure CLI and SPN environment variables are not set.", flush=True)
-        print("Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID.", flush=True)
+        print("ERROR: Not logged in to Azure CLI and neither managed identity nor SPN environment variables are available.", flush=True)
+        print("Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID, or enable managed identity.", flush=True)
         sys.exit(1)
 
 # Ensure SPN login at script start
