@@ -298,6 +298,32 @@ if ($confirm -ne 'Y' -and $confirm -ne 'y') {
 # STEP 1: SET AZURE CONTEXT
 # ===========================
 
+# Log in with Service Principal if ClientId and TenantId are provided
+if ($TenantId -and $ClientId) {
+    Write-Step "Logging in with Service Principal" "Magenta"
+
+    # Resolve ClientSecret: use parameter, else fall back to AZURE_CLIENT_SECRET env var
+    $resolvedSecret = $ClientSecret
+    if (-not $resolvedSecret) {
+        $resolvedSecret = $env:AZURE_CLIENT_SECRET
+    }
+
+    if (-not $resolvedSecret) {
+        Write-Warning "No ClientSecret supplied and AZURE_CLIENT_SECRET is not set. Attempting existing login..."
+    } else {
+        az login --service-principal `
+            --username $ClientId `
+            --password $resolvedSecret `
+            --tenant $TenantId `
+            --output none
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Service principal login failed"
+            exit 1
+        }
+        Write-Success "Logged in as service principal $ClientId"
+    }
+}
+
 Write-Step "Setting Azure subscription context" "Magenta"
 az account set --subscription $SubscriptionId
 if ($LASTEXITCODE -ne 0) {

@@ -1,14 +1,29 @@
 import os
 import re
+import sys
 import json
 import time
 import logging
+import ssl
 import urllib.request
 import urllib.error
 import yaml  # For reading agent prompts from YAML
 from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
+
+# Inject Windows certificate store so corporate MITM/proxy certs are trusted
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
+# Ensure stdout/stderr use UTF-8 on Windows (required for emoji output)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # --- Enterprise UI Styling ---
 # This class is used to print colored and formatted log messages to the console.
