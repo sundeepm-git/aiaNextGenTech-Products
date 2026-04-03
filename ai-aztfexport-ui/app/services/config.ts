@@ -163,6 +163,8 @@ const loadConfig = (): AppConfig => {
     ui: {
       logRetentionLimit: parseInt(process.env.NEXT_PUBLIC_LOG_RETENTION || '1000', 10),
       reconnectDelay: parseInt(process.env.NEXT_PUBLIC_RECONNECT_DELAY || '3000', 10),
+      sseHeartbeatInterval: parseInt(process.env.NEXT_PUBLIC_SSE_HEARTBEAT || '30000', 10),
+      longRunningJobThreshold: parseInt(process.env.NEXT_PUBLIC_LONG_RUNNING_THRESHOLD || '300000', 10),
     },
   };
 };

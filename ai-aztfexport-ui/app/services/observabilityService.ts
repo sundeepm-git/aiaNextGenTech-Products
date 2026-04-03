@@ -120,6 +120,13 @@ export interface HealthSummary {
   throughput: ThroughputSummary;
 }
 
+export interface ObservabilitySource {
+  source: string;
+  project_endpoint: string;
+  foundry_connection_configured: boolean;
+  individual_agent_metrics: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // API Calls
 // ---------------------------------------------------------------------------
@@ -179,5 +186,12 @@ export const fetchHealthSummary = async (): Promise<HealthSummary> => {
   const url = config.observability.endpoints.healthSummary;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch health summary: ${res.status}`);
+  return res.json();
+};
+
+export const fetchObservabilitySource = async (): Promise<ObservabilitySource> => {
+  const url = `${config.observability.baseUrl}/api/observability/source`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch observability source: ${res.status}`);
   return res.json();
 };

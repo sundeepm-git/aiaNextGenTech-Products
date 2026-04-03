@@ -4,6 +4,7 @@ import sys
 import argparse
 import subprocess
 import shutil
+import re
 from dotenv import load_dotenv
 from azure.identity import ClientSecretCredential
 
@@ -318,7 +319,11 @@ def main():
 
 
         html_report = generate_report_html(report_data)
-        report_filename = "Assessment-Report-Latest.html"
+
+        # Build unique report name per subscription+resource-group to avoid overwrites.
+        rg_for_name = args.resource_groups[0] if args.resource_groups else "all-resource-groups"
+        rg_safe = re.sub(r"[^A-Za-z0-9._-]", "-", rg_for_name)
+        report_filename = f"{subscription_id}-{rg_safe}-assessment-report.html"
         with open(report_filename, "w", encoding="utf-8") as f:
             f.write(html_report)
 
@@ -354,7 +359,8 @@ def main():
         response = {
             "jobId": str(uuid.uuid4()),
             "subscriptionId": subscription_id,
-            "resourceGroup": os.getenv("resourceGroup", "rg-mcp-servers"),
+            "resourceGroup": rg_for_name,
+            "reportFileName": report_filename,
             "status": "completed",
             "storageAccount": storage_account or "unknown",
             "startedAt": started_at,

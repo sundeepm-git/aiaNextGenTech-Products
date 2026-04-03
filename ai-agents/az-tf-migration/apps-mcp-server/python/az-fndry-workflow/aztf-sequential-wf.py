@@ -283,7 +283,7 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
                 for item in response.output:
                     item_type = getattr(item, 'type', 'unknown')
                     type_counts[item_type] = type_counts.get(item_type, 0) + 1
-                    if item_type == 'function_call':
+                    if item_type in ('function_call', 'tool_call', 'mcp_call'):
                         # The agent called an MCP tool — log which one and its arguments
                         tool_calls.append(f"{getattr(item, 'name', '?')}({getattr(item, 'arguments', '?')})")
                     elif item_type == 'message':
@@ -301,16 +301,94 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
                 for msg in seen_msgs:
                     UI.log("MSG (unique)", UI.CYAN, msg)
 
-            # --- Phase 2b: Extract real usage metrics from the Foundry response ---
+            # --- Phase 2b: Extract real usage metrics from Foundry response (multiple shapes) ---
             _tokens_prompt = 0
             _tokens_completion = 0
             _model_name = "unknown"
-            if hasattr(response, 'usage') and response.usage:
-                _tokens_prompt = getattr(response.usage, 'prompt_tokens', 0) or 0
-                _tokens_completion = getattr(response.usage, 'completion_tokens', 0) or 0
-                _total_tokens = getattr(response.usage, 'total_tokens', 0) or 0
+
+            def _to_int(value):
+                try:
+                    return int(value or 0)
+                except Exception:
+                    return 0
+
+            def _normalize_usage(usage_obj):
+                if not usage_obj:
+                    return (0, 0)
+
+                # Handle SDK objects and plain dict payloads across API variants.
+                if isinstance(usage_obj, dict):
+                    prompt_val = (
+                        usage_obj.get('prompt_tokens')
+                        or usage_obj.get('input_tokens')
+                        or usage_obj.get('promptTokenCount')
+                        or 0
+                    )
+                    completion_val = (
+                        usage_obj.get('completion_tokens')
+                        or usage_obj.get('output_tokens')
+                        or usage_obj.get('completionTokenCount')
+                        or 0
+                    )
+                    return (_to_int(prompt_val), _to_int(completion_val))
+
+                prompt_val = (
+                    getattr(usage_obj, 'prompt_tokens', None)
+                    or getattr(usage_obj, 'input_tokens', None)
+                    or getattr(usage_obj, 'promptTokenCount', None)
+                    or 0
+                )
+                completion_val = (
+                    getattr(usage_obj, 'completion_tokens', None)
+                    or getattr(usage_obj, 'output_tokens', None)
+                    or getattr(usage_obj, 'completionTokenCount', None)
+                    or 0
+                )
+                return (_to_int(prompt_val), _to_int(completion_val))
+
+            usage = getattr(response, 'usage', None)
+            _tokens_prompt, _tokens_completion = _normalize_usage(usage)
+
+            # Fallback for SDK shapes that expose nested dict payloads.
+            if (_tokens_prompt == 0 and _tokens_completion == 0) and hasattr(response, 'model_dump'):
+                try:
+                    raw = response.model_dump()
+                    usage_candidates = [
+                        raw.get('usage'),
+                        raw.get('response', {}).get('usage'),
+                        raw.get('metadata', {}).get('usage'),
+                    ]
+                    # Some SDK responses place usage on output items (e.g., tool or message items).
+                    for item in raw.get('output', []) or []:
+                        if isinstance(item, dict):
+                            usage_candidates.append(item.get('usage'))
+
+                    for candidate in usage_candidates:
+                        p, c = _normalize_usage(candidate)
+                        if p > 0 or c > 0:
+                            _tokens_prompt, _tokens_completion = p, c
+                            break
+                except Exception:
+                    pass
+
             if hasattr(response, 'model') and response.model:
                 _model_name = response.model
+            elif hasattr(response, 'model_dump'):
+                try:
+                    raw = response.model_dump()
+                    _model_name = raw.get('model') or raw.get('response', {}).get('model') or "unknown"
+                except Exception:
+                    pass
+
+            # If structured tool calls were not detected, use response metadata hints.
+            if tool_call_count == 0 and hasattr(response, 'output'):
+                try:
+                    tool_call_count = sum(
+                        1 for item in response.output
+                        if getattr(item, 'name', None) or 'tool' in str(getattr(item, 'type', '')).lower() or 'mcp' in str(getattr(item, 'type', '')).lower()
+                    )
+                except Exception:
+                    pass
             # Emit structured metrics line so WorkflowLogCapture can capture real values
             print(f"[AGENT_METRICS]: agent={agent_name}, tokens_prompt={_tokens_prompt}, tokens_completion={_tokens_completion}, model={_model_name}, tool_calls={tool_call_count}")
 

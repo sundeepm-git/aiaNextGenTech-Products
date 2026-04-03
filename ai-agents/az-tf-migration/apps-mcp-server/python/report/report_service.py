@@ -5,13 +5,14 @@ Authenticates via Service Principal using DefaultAzureCredential.
 Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID env vars for SP auth.
 
 Containers:
-  - assessment-reports : {subscriptionId}/Assessment-Report-Latest.html
+    - assessment-reports : {subscriptionId}/{subscriptionId}-{resourceGroup}-assessment-report.html
   - aztfexport         : {subscriptionId}/{resourceGroup}/*.tf
   - code-refactored    : {subscriptionId}/{resourceGroup}/*.tf
 """
 
 import os
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -31,9 +32,9 @@ _blob_service: BlobServiceClient = BlobServiceClient(ACCOUNT_URL, credential=_cr
 REPORT_CONTAINERS = {
     "assessment": {
         "container": "assessment-reports",
-        "blob_pattern": "{subscription_id}/Assessment-Report-Latest.html",
+        "blob_pattern": "{subscription_id}/{subscription_id}-{resource_group}-assessment-report.html",
         "display_name": "Assessment Report",
-        "filename": "Assessment-Report-Latest.html",
+        "filename": "{subscription_id}-{resource_group}-assessment-report.html",
     },
     "export": {
         "container": "aztfexport",
@@ -48,6 +49,13 @@ REPORT_CONTAINERS = {
         "filename": "CodeRefactor-Report.html",
     },
 }
+
+
+def build_assessment_report_blob_name(subscription_id: str, resource_group: str) -> str:
+    """Return deterministic assessment report blob path for a subscription/resource group."""
+    rg_safe = re.sub(r"[^A-Za-z0-9._-]", "-", resource_group or "all-resource-groups")
+    file_name = f"{subscription_id}-{rg_safe}-assessment-report.html"
+    return f"{subscription_id}/{file_name}"
 
 
 @dataclass
@@ -130,7 +138,7 @@ def get_report_tree(subscription_id: str, resource_group: str) -> dict:
     reports = {}
     for report_type, cfg in REPORT_CONTAINERS.items():
         if report_type == "assessment":
-            prefix = f"{subscription_id}/"
+            prefix = build_assessment_report_blob_name(subscription_id, resource_group)
         else:
             prefix = f"{subscription_id}/{resource_group}/"
 

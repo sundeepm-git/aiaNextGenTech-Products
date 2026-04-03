@@ -3,7 +3,7 @@
  */
 
 export interface ProgressLog {
-  type: 'stdout' | 'stderr' | 'info' | 'success' | 'error';
+  type: 'stdout' | 'stderr' | 'info' | 'success' | 'error' | 'warning';
   message: string;
   timestamp: string;
 }

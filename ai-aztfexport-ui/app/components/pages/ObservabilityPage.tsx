@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { Activity, BarChart3, Clock, DollarSign, RefreshCw, RotateCcw, Zap, AlertTriangle, CheckCircle2, XCircle, Eye } from 'lucide-react';
 import { useObservability, ObservabilityTab } from '@/app/hooks/useObservability';
 import type {
@@ -357,6 +358,19 @@ const tabs: { id: ObservabilityTab; label: string; icon: React.ElementType }[] =
   { id: 'throughput', label: 'Throughput', icon: Zap },
 ];
 
+const AGENT_FILTER_OPTIONS = ['All', 'Orchestrator', 'Assessment', 'Export', 'Refactor'] as const;
+const OBS_SELECTED_AGENT_KEY = 'observability:selected-agent';
+const OBS_SELECTED_TAB_KEY = 'observability:selected-tab';
+
+const normalizeAgent = (name: string | null | undefined): 'orchestrator' | 'assessment' | 'export' | 'refactor' | 'other' => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('orchestrator')) return 'orchestrator';
+  if (n.includes('assessment')) return 'assessment';
+  if (n.includes('export')) return 'export';
+  if (n.includes('refactor')) return 'refactor';
+  return 'other';
+};
+
 export default function ObservabilityPage() {
   const {
     activeTab,
@@ -371,10 +385,194 @@ export default function ObservabilityPage() {
     retrySummary,
     retryEntries,
     throughput,
+    sourceInfo,
     refresh,
     autoRefresh,
     setAutoRefresh,
   } = useObservability();
+
+  const [selectedAgent, setSelectedAgent] = useState<(typeof AGENT_FILTER_OPTIONS)[number]>('All');
+  const selectedAgentKey = selectedAgent === 'All' ? 'all' : normalizeAgent(selectedAgent);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(OBS_SELECTED_AGENT_KEY);
+      if (stored && AGENT_FILTER_OPTIONS.includes(stored as (typeof AGENT_FILTER_OPTIONS)[number])) {
+        setSelectedAgent(stored as (typeof AGENT_FILTER_OPTIONS)[number]);
+      }
+    } catch {
+      // Ignore storage access issues and keep default filter.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OBS_SELECTED_AGENT_KEY, selectedAgent);
+    } catch {
+      // Ignore storage access issues.
+    }
+  }, [selectedAgent]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(OBS_SELECTED_TAB_KEY);
+      if (stored && tabs.some(t => t.id === stored)) {
+        setActiveTab(stored as ObservabilityTab);
+      }
+    } catch {
+      // Ignore storage access issues and keep default tab.
+    }
+  }, [setActiveTab]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OBS_SELECTED_TAB_KEY, activeTab);
+    } catch {
+      // Ignore storage access issues.
+    }
+  }, [activeTab]);
+
+  const filteredMetrics = useMemo<MetricsResponse | null>(() => {
+    if (!metrics) return null;
+    if (selectedAgentKey === 'all') return metrics;
+
+    const filteredEntries = Object.entries(metrics.agents).filter(([, a]) => normalizeAgent(a.agent_name) === selectedAgentKey);
+    const filteredAgents = Object.fromEntries(filteredEntries) as Record<string, AgentMetrics>;
+    const values = Object.values(filteredAgents);
+
+    const total_calls = values.reduce((s, a) => s + a.total_calls, 0);
+    const total_failures = values.reduce((s, a) => s + a.total_failures, 0);
+    const total_retries = values.reduce((s, a) => s + a.total_retries, 0);
+    const total_tokens = values.reduce((s, a) => s + a.total_tokens, 0);
+    const total_latency_ms = values.reduce((s, a) => s + a.total_latency_ms, 0);
+    const total_tool_calls = values.reduce((s, a) => s + a.total_tool_calls, 0);
+
+    return {
+      summary: {
+        total_calls,
+        total_failures,
+        total_retries,
+        total_tokens,
+        failure_rate: total_calls > 0 ? Number((total_failures / total_calls).toFixed(4)) : 0,
+        retry_rate: total_calls > 0 ? Number((total_retries / total_calls).toFixed(4)) : 0,
+        latency_p50_ms: values.length ? Math.round(values.reduce((s, a) => s + a.p50_latency_ms, 0) / values.length) : 0,
+        latency_p95_ms: values.length ? Math.max(...values.map(a => a.p95_latency_ms)) : 0,
+        latency_p99_ms: values.length ? Math.max(...values.map(a => a.p99_latency_ms)) : 0,
+        avg_latency_ms: total_calls > 0 ? Number((total_latency_ms / total_calls).toFixed(1)) : 0,
+        agents_tracked: values.length,
+        jobs_tracked: metrics.summary.jobs_tracked,
+      },
+      agents: filteredAgents,
+    };
+  }, [metrics, selectedAgentKey]);
+
+  const filteredTraces = useMemo<Trace[]>(() => {
+    if (selectedAgentKey === 'all') return traces;
+    return traces.filter(t => t.spans.some(s => normalizeAgent(s.agent) === selectedAgentKey));
+  }, [traces, selectedAgentKey]);
+
+  const filteredCostRecords = useMemo<CostRecord[]>(() => {
+    if (selectedAgentKey === 'all') return costRecords;
+    return costRecords.filter(r => normalizeAgent(r.agent) === selectedAgentKey);
+  }, [costRecords, selectedAgentKey]);
+
+  const filteredCostSummary = useMemo<CostSummary | null>(() => {
+    if (!costSummary) return null;
+    if (selectedAgentKey === 'all') return costSummary;
+
+    const by_agent: Record<string, number> = {};
+    const by_model: Record<string, number> = {};
+    let total_cost_usd = 0;
+    let total_tokens = 0;
+
+    for (const r of filteredCostRecords) {
+      total_cost_usd += r.cost_total;
+      total_tokens += (r.tokens_prompt + r.tokens_completion);
+      by_agent[r.agent] = Number(((by_agent[r.agent] || 0) + r.cost_total).toFixed(4));
+      by_model[r.model] = Number(((by_model[r.model] || 0) + r.cost_total).toFixed(4));
+    }
+
+    return {
+      total_cost_usd: Number(total_cost_usd.toFixed(4)),
+      total_tokens,
+      total_records: filteredCostRecords.length,
+      by_agent,
+      by_model,
+    };
+  }, [costSummary, filteredCostRecords, selectedAgentKey]);
+
+  const filteredRetryEntries = useMemo<RetryEntry[]>(() => {
+    if (selectedAgentKey === 'all') return retryEntries;
+    return retryEntries.filter(r => normalizeAgent(r.agent) === selectedAgentKey);
+  }, [retryEntries, selectedAgentKey]);
+
+  const filteredRetrySummary = useMemo<RetrySummary | null>(() => {
+    if (!retrySummary) return null;
+    if (selectedAgentKey === 'all') return retrySummary;
+
+    const by_agent: Record<string, number> = {};
+    const by_reason: Record<string, number> = {};
+    for (const r of filteredRetryEntries) {
+      by_agent[r.agent] = (by_agent[r.agent] || 0) + 1;
+      by_reason[r.reason] = (by_reason[r.reason] || 0) + 1;
+    }
+    return {
+      total_retries: filteredRetryEntries.length,
+      by_agent,
+      by_reason,
+    };
+  }, [retrySummary, filteredRetryEntries, selectedAgentKey]);
+
+  const filteredThroughput = useMemo<ThroughputSummary | null>(() => {
+    if (!throughput) return null;
+    if (selectedAgentKey === 'all') return throughput;
+
+    const now = Date.now();
+    const windowMs = throughput.window_seconds * 1000;
+    const recentCount = filteredTraces.filter(t => {
+      const ts = Date.parse(t.started_at || '');
+      return Number.isFinite(ts) && (now - ts) <= windowMs;
+    }).length;
+
+    return {
+      requests_per_minute: recentCount,
+      window_seconds: throughput.window_seconds,
+    };
+  }, [throughput, filteredTraces, selectedAgentKey]);
+
+  const filteredHealth = useMemo<HealthSummary | null>(() => {
+    if (!health) return null;
+    if (selectedAgentKey === 'all') return health;
+
+    const summary = filteredMetrics?.summary || health.metrics;
+    const cost = filteredCostSummary || health.cost;
+    const retries = filteredRetrySummary || health.retries;
+    const tp = filteredThroughput || health.throughput;
+    const issues: string[] = [];
+
+    let healthState: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    if (summary.total_calls === 0) {
+      healthState = 'degraded';
+      issues.push(`No runs recorded for ${selectedAgent}`);
+    }
+    if (summary.failure_rate > 0.1) {
+      healthState = 'degraded';
+      issues.push(`High failure rate for ${selectedAgent}: ${(summary.failure_rate * 100).toFixed(1)}%`);
+    }
+    if (summary.latency_p95_ms > 30000) {
+      healthState = 'degraded';
+      issues.push(`High p95 latency for ${selectedAgent}: ${summary.latency_p95_ms}ms`);
+    }
+
+    return {
+      health: healthState,
+      issues,
+      metrics: summary,
+      cost,
+      retries,
+      throughput: tp,
+    };
+  }, [health, filteredMetrics, filteredCostSummary, filteredRetrySummary, filteredThroughput, selectedAgentKey, selectedAgent]);
 
   return (
     <div className="flex-1 w-full max-w-7xl mx-auto p-6 space-y-6 pb-24 bg-surface">
@@ -387,8 +585,30 @@ export default function ObservabilityPage() {
           <p className="text-muted text-sm mt-1">
             Agent metrics, traces, costs, retries, throughput &amp; health
           </p>
+          {sourceInfo && (
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <span className="px-2 py-1 rounded bg-blue-100 text-blue-700 font-medium">
+                Source: {sourceInfo.source}
+              </span>
+              <span className={`px-2 py-1 rounded font-medium ${sourceInfo.foundry_connection_configured ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                Foundry Connection: {sourceInfo.foundry_connection_configured ? 'Configured' : 'Missing'}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <label className="text-muted">Agent</label>
+            <select
+              value={selectedAgent}
+              onChange={(e) => setSelectedAgent(e.target.value as (typeof AGENT_FILTER_OPTIONS)[number])}
+              className="px-3 py-2 rounded-lg border border-border bg-white text-text"
+            >
+              {AGENT_FILTER_OPTIONS.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </div>
           <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
             <input
               type="checkbox"
@@ -439,12 +659,12 @@ export default function ObservabilityPage() {
 
       {/* Tab Content */}
       <div className="min-h-[400px]">
-        {activeTab === 'health' && health && <HealthPanel health={health} />}
-        {activeTab === 'metrics' && metrics && <MetricsPanel data={metrics} />}
-        {activeTab === 'traces' && <TracesPanel traces={traces} />}
-        {activeTab === 'costs' && costSummary && <CostsPanel summary={costSummary} records={costRecords} />}
-        {activeTab === 'retries' && retrySummary && <RetriesPanel summary={retrySummary} entries={retryEntries} />}
-        {activeTab === 'throughput' && throughput && <ThroughputPanel data={throughput} />}
+        {activeTab === 'health' && filteredHealth && <HealthPanel health={filteredHealth} />}
+        {activeTab === 'metrics' && filteredMetrics && <MetricsPanel data={filteredMetrics} />}
+        {activeTab === 'traces' && <TracesPanel traces={filteredTraces} />}
+        {activeTab === 'costs' && filteredCostSummary && <CostsPanel summary={filteredCostSummary} records={filteredCostRecords} />}
+        {activeTab === 'retries' && filteredRetrySummary && <RetriesPanel summary={filteredRetrySummary} entries={filteredRetryEntries} />}
+        {activeTab === 'throughput' && filteredThroughput && <ThroughputPanel data={filteredThroughput} />}
 
         {loading && !health && !metrics && (
           <div className="flex items-center justify-center py-20">

@@ -8,6 +8,7 @@ import {
   fetchRetries,
   fetchThroughput,
   fetchHealthSummary,
+  fetchObservabilitySource,
 } from '@/app/services/observabilityService';
 import type {
   MetricsResponse,
@@ -18,6 +19,7 @@ import type {
   RetryEntry,
   ThroughputSummary,
   HealthSummary,
+  ObservabilitySource,
 } from '@/app/services/observabilityService';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ export interface UseObservabilityReturn {
   retrySummary: RetrySummary | null;
   retryEntries: RetryEntry[];
   throughput: ThroughputSummary | null;
+  sourceInfo: ObservabilitySource | null;
   refresh: () => Promise<void>;
   autoRefresh: boolean;
   setAutoRefresh: (v: boolean) => void;
@@ -60,6 +63,7 @@ export const useObservability = (): UseObservabilityReturn => {
   const [retrySummary, setRetrySummary] = useState<RetrySummary | null>(null);
   const [retryEntries, setRetryEntries] = useState<RetryEntry[]>([]);
   const [throughput, setThroughput] = useState<ThroughputSummary | null>(null);
+  const [sourceInfo, setSourceInfo] = useState<ObservabilitySource | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -67,13 +71,14 @@ export const useObservability = (): UseObservabilityReturn => {
     setLoading(true);
     setError(null);
     try {
-      const [h, m, t, c, r, tp] = await Promise.all([
+      const [h, m, t, c, r, tp, src] = await Promise.all([
         fetchHealthSummary(),
         fetchMetrics(),
         fetchTraces(50),
         fetchCosts(100),
         fetchRetries(100),
         fetchThroughput(),
+        fetchObservabilitySource(),
       ]);
       setHealth(h);
       setMetrics(m);
@@ -83,6 +88,7 @@ export const useObservability = (): UseObservabilityReturn => {
       setRetrySummary(r.summary);
       setRetryEntries(r.retries);
       setThroughput(tp);
+      setSourceInfo(src);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch observability data';
       setError(msg);
@@ -119,6 +125,7 @@ export const useObservability = (): UseObservabilityReturn => {
     retrySummary,
     retryEntries,
     throughput,
+    sourceInfo,
     refresh,
     autoRefresh,
     setAutoRefresh,

@@ -2,6 +2,7 @@
 Observability API Router — FastAPI endpoints for metrics, traces, costs, and health.
 """
 
+import os
 from fastapi import APIRouter, Query
 from typing import Optional
 
@@ -28,8 +29,22 @@ observability_router = APIRouter(prefix="/api/observability", tags=["observabili
 async def get_metrics(agent: Optional[str] = Query(None, description="Filter by agent name")):
     """Return aggregated metrics, optionally filtered by agent."""
     return {
+        "source": "foundry_response_usage",
+        "project_endpoint": os.getenv("AZURE_AI_PROJECT_ENDPOINT", ""),
         "summary": metrics_collector.get_summary(),
         "agents": metrics_collector.get_agent_metrics(agent),
+    }
+
+
+@observability_router.get("/source")
+async def get_observability_source():
+    """Return observability data source and Foundry connection hints."""
+    project_endpoint = os.getenv("AZURE_AI_PROJECT_ENDPOINT", "")
+    return {
+        "source": "foundry_response_usage",
+        "project_endpoint": project_endpoint,
+        "foundry_connection_configured": bool(project_endpoint),
+        "individual_agent_metrics": True,
     }
 
 

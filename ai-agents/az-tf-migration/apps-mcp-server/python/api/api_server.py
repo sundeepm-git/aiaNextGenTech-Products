@@ -153,6 +153,7 @@ class WorkflowLogCapture(io.TextIOBase):
         self._buf = ""
         self._agent_start_time: dict[str, float] = {}   # agent_name -> time.time()
         self._current_agent: str | None = None
+        self._current_agent_raw: str | None = None
         # Real metrics emitted by the workflow via [AGENT_METRICS] lines
         self._agent_metrics_cache: dict[str, dict] = {}  # agent_label -> {tokens_prompt, tokens_completion, model, tool_calls}
 
@@ -182,10 +183,12 @@ class WorkflowLogCapture(io.TextIOBase):
         if "[AGENT_METRICS]:" in clean:
             try:
                 payload = clean.split("[AGENT_METRICS]:", 1)[1].strip()
-                parts = dict(p.strip().split("=", 1) for p in payload.split(",") if "=" in p)
+                # Parse key=value pairs safely even if extra spaces appear.
+                parts = dict(re.findall(r"(\w+)\s*=\s*([^,]+)", payload))
                 raw_agent = parts.get("agent", "").strip()
                 label = STEP_PATTERNS.get(raw_agent, (raw_agent, None))[0]
                 self._agent_metrics_cache[label] = {
+                    "agent_name": raw_agent or label,
                     "tokens_prompt": int(parts.get("tokens_prompt", 0)),
                     "tokens_completion": int(parts.get("tokens_completion", 0)),
                     "model": parts.get("model", "unknown").strip(),
@@ -206,6 +209,7 @@ class WorkflowLogCapture(io.TextIOBase):
                 self._finalize_agent_span(self._current_agent, success=True)
 
             self._current_agent = label
+            self._current_agent_raw = agent_name
             self._agent_start_time[label] = time.time()
 
             jobs.update(self.job_id, currentAgent=label, status="running")
@@ -257,13 +261,14 @@ class WorkflowLogCapture(io.TextIOBase):
 
         # Use real metrics from the workflow's [AGENT_METRICS] line, or zeros if not available
         real = self._agent_metrics_cache.pop(agent_label, {})
+        metric_agent_name = real.get("agent_name", self._current_agent_raw or agent_label)
         tokens_prompt = real.get("tokens_prompt", 0)
         tokens_completion = real.get("tokens_completion", 0)
         model = real.get("model", "unknown")
         tool_calls = real.get("tool_calls", 0)
 
         metrics_collector.record_call(
-            agent_name=agent_label,
+            agent_name=metric_agent_name,
             job_id=self.job_id,
             latency_ms=latency_ms,
             tokens_prompt=tokens_prompt,
@@ -275,7 +280,7 @@ class WorkflowLogCapture(io.TextIOBase):
         trace_store.add_span(
             job_id=self.job_id,
             span_type="agent_step",
-            agent_name=agent_label,
+            agent_name=metric_agent_name,
             duration_ms=latency_ms,
             tokens_prompt=tokens_prompt,
             tokens_completion=tokens_completion,
@@ -286,7 +291,7 @@ class WorkflowLogCapture(io.TextIOBase):
         # Only record cost if we have real token data
         if tokens_prompt > 0 or tokens_completion > 0:
             cost_calculator.record_usage(
-                agent_name=agent_label,
+                agent_name=metric_agent_name,
                 job_id=self.job_id,
                 model=model,
                 tokens_prompt=tokens_prompt,
@@ -511,8 +516,8 @@ def get_assessment_report(job_id: str, subscription_id: str, resource_group: str
     if jp.status != "completed":
         raise HTTPException(status_code=400, detail=f"Job not completed yet (status: {jp.status})")
 
-    from report.report_service import download_blob
-    blob_name = f"{subscription_id}/Assessment-Report-Latest.html"
+    from report.report_service import download_blob, build_assessment_report_blob_name
+    blob_name = build_assessment_report_blob_name(subscription_id, resource_group)
     content = download_blob("assessment-reports", blob_name)
     if content is None:
         raise HTTPException(status_code=404, detail=f"Report not found: {blob_name}")
