@@ -1,263 +1,218 @@
-# Aztra - Azure Migration Neural Interface
+# UI API Layer README
 
-Modern Generative AI User Interface for Azure-to-Terraform Migration with **Real-time Progress Streaming** via Server-Sent Events (SSE).
+This is the single source of truth for running the UI and API layer in sequence for Azure-to-Terraform workflow execution.
 
-Built with **Next.js 14**, **React 18**, **TypeScript**, **TailwindCSS**, and **Framer Motion**.
+## Scope
 
----
+This README covers:
 
-## 🎯 Key Features
+1. Local prerequisites
+2. Environment setup
+3. Start order for MCP, API, and UI
+4. End-to-end run flow
+5. Progress and timeout behavior
+6. Troubleshooting and recovery
+7. Production deployment command
 
-### 🔴 **Real-time Migration Progress** (NEW!)
-- **Live SSE streaming** from MCP server
-- Terminal-style log viewer with color-coded output
-- Connection status indicators (Connecting, Connected, Completed, Error)
-- Auto-reconnect on connection loss
-- Job ID tracking for each export
+## Folder Structure
 
-### 🤖 **Sequential Agent Visualization**
-- Watch Assessment, Migration, and Refactoring agents work in sequence
-- Visual pipeline showing active agent stage
-- Agent status indicators (idle, processing, success, failed)
+1. UI: ai-aztfexport-ui
+2. API: ai-agents/az-tf-migration/apps-mcp-server/python/api
+3. MCP Server: ai-agents/az-tf-migration/apps-mcp-server
+4. Workflow Engine: ai-agents/az-tf-migration/apps-mcp-server/python/az-fndry-workflow
 
-### 💻 **Live Terminal Emulation**
-- Real-time log streaming with timestamps
-- Color-coded output (stdout, stderr, info, success, error)
-- Auto-scrolling to latest messages
-- Clear logs functionality
+## Prerequisites
 
-### 🧠 **Foundry Command Center**
-- Natural language input to trigger migrations
-- Structured input for Subscription ID and Resource Group
-- Context-aware export orchestration
+1. Windows PowerShell
+2. Node.js 18+
+3. Python virtual environment at repository root: .venv
+4. Azure CLI installed and authenticated
+5. Access to subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2
+6. Storage account samcpstorage
 
-### 📊 **Storage Insights**
-- Azure Blob Storage visualization
-- Storage path display: `aztfExport/{subscriptionId}/{resourceGroup}/`
-- Export completion status with file inventory
+## Step 1: Open Repository Root
 
----
+Run from:
 
-## 📋 Prerequisites
-
-- **Node.js 18+** installed
-- **MCP Server** running on port 8080 (default)
-- **Azure CLI** authenticated (`az login`)
-- **aztfexport** tool installed
-- **PowerShell 7+** (for backend scripting)
-
----
-
-## 🚀 Quick Start
-
-### 1. Install Dependencies
-```bash
-cd ai-aztfexport-ui
-npm install
+```powershell
+cd c:\Users\sunsu\OneDrive\Desktop\Sundeep\AI-Projects\ai-Repository\Generative-AI-Projects\aiaNextGen-Products
 ```
 
-### 2. Configure Backend
-Create `.env.local`:
+## Step 2: Set PowerShell Execution Policy
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+## Step 3: Activate Python Virtual Environment
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+## Step 4: Configure UI Environment
+
+File: ai-aztfexport-ui/.env.local
+
+Use these values for local development:
+
 ```env
 NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:8080
+NEXT_PUBLIC_WORKFLOW_API_URL=http://localhost:8000
+NEXT_PUBLIC_AZURE_STORAGE_ACCOUNT=samcpstorage
+NEXT_PUBLIC_AZURE_CONTAINER=aztfExport
+
+NEXT_PUBLIC_ENABLE_REAL_MIGRATION=true
+NEXT_PUBLIC_ENABLE_SIMULATION=true
+NEXT_PUBLIC_AUTO_RECONNECT=true
+
+NEXT_PUBLIC_API_TIMEOUT=600000
+NEXT_PUBLIC_RETRY_ATTEMPTS=3
+NEXT_PUBLIC_RETRY_DELAY=5000
+NEXT_PUBLIC_RECONNECT_DELAY=5000
+NEXT_PUBLIC_SSE_HEARTBEAT=30000
+NEXT_PUBLIC_LONG_JOB_THRESHOLD=300000
+NEXT_PUBLIC_LOG_RETENTION=1000
 ```
 
-### 3. Start MCP Server (Required for Real SSE)
-```bash
-cd ../ai-agents/az-tf-migration/apps-mcp-server
-npm install  # First time only
-npm start
+Notes:
+
+1. Keep localhost URLs in .env.local for local development.
+2. deploy.ps1 builds production UI image with Azure URLs and does not overwrite local .env.local.
+
+## Step 5: Start MCP Server (Terminal 1)
+
+```powershell
+cd ai-agents\az-tf-migration\apps-mcp-server
+npm install
+node index.js
 ```
 
-Expected output:
-```
-MCP Server v2.0.0 running on http://localhost:8080
-SSE endpoint available at /jobs/:id/progress
+Expected:
+
+1. MCP process starts without crash
+2. Port 8080 is listening
+
+## Step 6: Start API Server (Terminal 2)
+
+```powershell
+cd ai-agents\az-tf-migration\apps-mcp-server\python\api
+..\..\..\..\..\.venv\Scripts\python.exe -m uvicorn api_server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 4. Run Development Server
-```bash
+Health checks:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get
+```
+
+Swagger:
+
+1. http://localhost:8000/docs
+
+## Step 7: Start UI (Terminal 3)
+
+```powershell
 cd ai-aztfexport-ui
+npm install
 npm run dev
 ```
 
-### 5. Open in Browser
-Navigate to [http://localhost:3000](http://localhost:3000)
+Open:
 
-Click **"Migration"** in the sidebar to access the real-time export interface.
+1. http://localhost:3000
 
----
+## Step 8: Run Workflow from UI
 
-## 🏗️ Architecture
+In Workflow page, use prompt:
 
-```
-┌───────────────────────────────────┐
-│     MigrationPage Component       │
-│  (Real-time SSE Integration)      │
-└───────────┬───────────────────────┘
-            │
-            │ uses
-            ▼
-┌───────────────────────────────────┐
-│    useExportProgress Hook         │
-│  (EventSource SSE Connection)     │
-└───────────┬───────────────────────┘
-            │
-            │ SSE Stream
-            ▼
-┌───────────────────────────────────┐
-│       MCP Server (Node.js)        │
-│  POST /messages                   │
-│  GET /jobs/:id/progress (SSE)     │
-└───────────┬───────────────────────┘
-            │
-            │ spawns
-            ▼
-┌───────────────────────────────────┐
-│    PowerShell Script              │
-│  Export-AzToTerraform.ps1         │
-└───────────┬───────────────────────┘
-            │
-            │ executes
-            ▼
-┌───────────────────────────────────┐
-│      aztfexport CLI               │
-│  (Azure → Terraform)              │
-└───────────────────────────────────┘
+```text
+Migrate resource group 'rg-mcp-servers' from subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2
 ```
 
----
+Execution sequence:
 
-## 📂 Key Files
+1. Orchestrator
+2. Assessment
+3. Export
+4. Refactor
 
-### Frontend
+## Step 9: Verify Export Progress Behavior
+
+Expected behavior:
+
+1. Export can run several minutes without timeout.
+2. UI keeps polling and reconnecting when needed.
+3. Status heartbeat continues from API.
+4. Job completes only when API emits complete status.
+
+Technical settings currently applied:
+
+1. UI request timeout: 600000 ms
+2. SSE reconnect delay: 5000 ms
+3. SSE heartbeat warning threshold: 30000 ms
+4. API event wait interval: 10 seconds
+
+## Step 10: Validate Output in Storage
+
+Container and path:
+
+1. Container: aztfexport
+2. Prefix: subscriptionId/resourceGroup
+
+Example check:
+
+```powershell
+az storage blob list --account-name samcpstorage --container-name aztfexport --prefix "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2/rg-mcp-servers" --auth-mode login --output table
 ```
-ai-aztfexport-ui/
-├── app/
-│   ├── hooks/
-│   │   ├── useExportProgress.ts     # NEW: Real SSE hook
-│   │   └── useAgentStream.ts        # Simulation framework
-│   └── components/
-│       └── pages/
-│           └── MigrationPage.tsx    # UPDATED: Real SSE integration
-│
-├── .env.local                       # MCP server URL config
-├── SSE-INTEGRATION-GUIDE.md         # Detailed technical docs
-├── QUICK-START.md                   # User getting started guide
-├── ARCHITECTURE-DIAGRAM.md          # Visual architecture
-└── INTEGRATION-COMPLETE.md          # Implementation summary
+
+## Step 11: Common Failure Recovery
+
+If UI is up but API is down:
+
+1. Restart API server first
+2. Refresh UI page
+
+If API is up but MCP is down:
+
+1. Restart MCP server
+2. Re-run workflow from UI
+
+If export completed but verification is flaky:
+
+1. Workflow now uses SDK-based storage verification path
+2. Re-run only when status is failed, not when status is completed
+
+If port conflict exists:
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000,8000,8080 -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess
 ```
 
-### Backend (MCP Server)
+## Step 12: Production Deployment (Single Script)
+
+Use only deploy.ps1:
+
+```powershell
+cd ai-agents\az-tf-migration\apps-mcp-server
+.\deploy.ps1 -ResourceGroupName "rg-mcp-servers" -SubscriptionId "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2" -TenantId "a0e1f124-d84e-4ef7-bf4b-926b60443fb9" -ClientId "4a7f6b45-8322-4cfe-bd16-008afdcc1221" -StorageAccountName "samcpstorage" -ContainerName "aztfexport" -ContainerAppName "aztf-mcp-app" -LogAnalyticsWorkspace "workspace-rgmcpserversIh7a" -AcrName "aztfmcpacr" -ImageTag "v2.5" -Port 3000 -MinReplicas 0 -MaxReplicas 1 -Cpu 0.25 -Memory "0.5Gi" -NoCache
 ```
-ai-agents/az-tf-migration/apps-mcp-server/
-├── index.js                         # SSE endpoint
-├── tools/aztfexport.js              # Progress callbacks
-├── ps/Export-AzToTerraform.ps1      # PowerShell script
-└── REALTIME-PROGRESS.md             # Backend SSE docs
-```
 
----
+This deploys in sequence:
 
-## 🎨 UI Components
+1. MCP Server container app
+2. API Server container app
+3. UI container app
 
-### Migration Page Sections
+## Final Checklist
 
-1. **Input Form**
-   - Subscription ID (required)
-   - Resource Group (required)
-   - Additional Context (optional)
-   - Start Export button
-
-2. **Status Bar**
-   - Connection status badge (color-coded)
-   - Job ID display
-   - Clear logs button
-   - Reconnect button (when disconnected)
-
-3. **Real-time Logs**
-   - Dark terminal-style display
-   - Color-coded messages:
-     - 🔵 Cyan: stdout (normal output)
-     - 🔴 Red: stderr (error output)
-     - 🔵 Blue: info (system messages)
-     - 🟢 Green: success (completion)
-   - Timestamps for each entry
-   - Auto-scroll to latest
-
-4. **Completion Message**
-   - Success card with storage path
-   - File inventory
-   - Resource count
-
----
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NEXT_PUBLIC_MCP_SERVER_URL` | `http://localhost:8080` | MCP server base URL |
-
-### MCP Server Requirements
-
-✅ SSE endpoint: `GET /jobs/:id/progress`  
-✅ Export endpoint: `POST /messages`  
-✅ Progress callbacks in `aztfexport.js`  
-
----
-
-## 🧪 Testing
-
-### Manual Test Flow
-
-1. **Start both servers**
-   ```bash
-   # Terminal 1: MCP Server
-   cd ai-agents/az-tf-migration/apps-mcp-server
-   npm start
-
-   # Terminal 2: UI
-   cd ai-aztfexport-ui
-   npm run dev
-   ```
-
-2. **Navigate to Migration page**
-   - Open `http://localhost:3000`
-   - Click "Migration" in sidebar
-
-3. **Run export**
-   - Enter Subscription ID: `d0f1884d-1f98-4bf1-9e15-e2986fc1bca2`
-   - Enter Resource Group: `rg-mcp-servers`
-   - Click "Start Export"
-
-4. **Watch real-time logs**
-   - Verify connection status: 🟢 Connected
-   - See logs streaming in real-time
-   - Check auto-scroll behavior
-
-5. **Verify completion**
-   - Status changes to: 🔵 Completed
-   - Completion message displays
-   - Storage path shown correctly
-
----
-
-## 🐛 Troubleshooting
-
-### Connection Error
-**Issue:** Cannot connect to MCP server
-
-**Solution:**
-```bash
-# Check MCP server is running
-curl http://localhost:8080
-
-# Restart if needed
-cd ai-agents/az-tf-migration/apps-mcp-server
-npm start
-```
+1. MCP running on 8080
+2. API running on 8000
+3. UI running on 3000
+4. Workflow prompt accepted
+5. Export progress remains active until complete
+6. Refactor starts after export completion
+7. Blob files present in storage
 
 ---
 

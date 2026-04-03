@@ -1,10 +1,13 @@
 # Agent-specific prompts for sequential workflow
 
 aztf-orchestrator-v1: |
-  Extract and validate the following Azure parameters:
-    subscriptionId: {sub_id}
-    resourceGroup: {rg_name}
-  Return them as a JSON object with keys 'subscriptionId' and 'resourceGroup'.
+  You are an Azure parameter extraction agent. The user said:
+  "{user_prompt}"
+  Extract the Azure subscriptionId (a UUID like d0f1884d-1f98-4bf1-9e15-e2986fc1bca2)
+  and resourceGroup name from the user's message.
+  Return ONLY a JSON object with keys 'subscriptionId' and 'resourceGroup'.
+  Example: {{"subscriptionId": "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2", "resourceGroup": "rg-mcp-servers"}}
+  If you cannot find both values, return: {{"error": "Could not extract subscriptionId and resourceGroup from the prompt."}}
 
 aztf-assessment-v1: |
   Call the 'azure_assessment' tool with these EXACT parameters:

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar, { PageType } from './components/Sidebar';
 import FoundryCommandCenter from './components/FoundryCommandCenter';
@@ -13,8 +13,20 @@ import MigrationPage from './components/pages/MigrationPage';
 import RefactoringPage from './components/pages/RefactoringPage';
 import SummaryPage from './components/pages/SummaryPage';
 import SettingsPage from './components/pages/SettingsPage';
+import ReportPage from './components/pages/ReportPage';
+import ObservabilityPage from './components/pages/ObservabilityPage';
 import { useAgentStream, AgentType } from './hooks/useAgentStream';
 import { useExportProgress } from './hooks/useExportProgress';
+import { useAgenticWorkflow } from './hooks/useAgenticWorkflow';
+import { config } from './services/config';
+
+// Map SSE agent names from the API to AgentType IDs used by AgentPipeline
+const AGENT_NAME_MAP: Record<string, AgentType> = {
+  'Orchestrator': 'orchestrator',
+  'Assessment': 'assessment',
+  'Export': 'migration',
+  'Refactor': 'refactoring',
+};
 
 export default function Home() {
   const { 
@@ -23,6 +35,9 @@ export default function Home() {
     streamStatus, 
     startOrchestration, 
     reconnect, 
+    updateAgent,
+    resetAgents,
+    setActiveAgent,
     terminalLogs 
   } = useAgentStream();
 
@@ -35,6 +50,17 @@ export default function Home() {
     reconnect: reconnectMigration,
     clearLogs: clearMigrationLogs
   } = useExportProgress();
+
+  // Agentic workflow hook
+  const {
+    logs: agenticLogs,
+    status: agenticStatus,
+    isRunning: agenticRunning,
+    currentAgent: agenticCurrentAgent,
+    progress: agenticProgress,
+    startWorkflow,
+    clearLogs: clearAgenticLogs,
+  } = useAgenticWorkflow();
 
   // Page navigation state
   const [currentPage, setCurrentPage] = useState<PageType>('workflow');
@@ -55,27 +81,65 @@ export default function Home() {
     }
   }, [activeAgent]);
 
+  // ── Drive AgentPipeline visuals from real agentic workflow events ──
+  // Track how many logs we've already processed so we don't re-process old ones
+  const processedLogCount = useRef(0);
+
+  useEffect(() => {
+    const newLogs = agenticLogs.slice(processedLogCount.current);
+    processedLogCount.current = agenticLogs.length;
+
+    for (const log of newLogs) {
+      // Detect agent started → set to 'processing'
+      if (log.message.startsWith('Agent started:') && log.agent) {
+        const agentType = AGENT_NAME_MAP[log.agent];
+        if (agentType) {
+          setActiveAgent(agentType);
+          updateAgent(agentType, { status: 'processing' });
+        }
+      }
+
+      // Detect SUCCESS → set current agent to 'success' (green)
+      if (log.type === 'success' && log.message.includes('SUCCESS') && log.agent) {
+        const agentType = AGENT_NAME_MAP[log.agent];
+        if (agentType) {
+          updateAgent(agentType, { status: 'success' });
+        }
+      }
+
+      // Detect errors/failures → set current agent to 'failed' (red)
+      if (log.type === 'error' && log.agent) {
+        const agentType = AGENT_NAME_MAP[log.agent];
+        if (agentType) {
+          updateAgent(agentType, { status: 'failed' });
+        }
+      }
+    }
+
+    // When the whole pipeline completes, mark summary as success
+    if (agenticStatus === 'completed') {
+      updateAgent('summary', { status: 'success' });
+    }
+
+    // When the pipeline fails, mark summary as failed (red)
+    if (agenticStatus === 'failed') {
+      updateAgent('summary', { status: 'failed' });
+    }
+  }, [agenticLogs, agenticStatus, setActiveAgent, updateAgent]);
+
   const handleCommand = (cmd: string) => {
-    // Parse command for subscription ID and resource group
-    const subIdMatch = cmd.match(/subscription[\s:]+(<?[a-z0-9-]+>?)/i);
-    const rgMatch = cmd.match(/(?:resource\s?group|rg)[\s:]+(<?[\w-]+>?)/i);
-    
-    if (subIdMatch && rgMatch) {
-      // Extract IDs (remove angle brackets if present)
-      const subscriptionId = subIdMatch[1].replace(/[<>]/g, '');
-      const resourceGroup = rgMatch[1].replace(/[<>]/g, '');
-      
-      // Start real migration export
-      setShowRealMigration(true);
-      setSelectedView('migration');
-      startExport(subscriptionId, resourceGroup, cmd);
-    }
-    
-    // Also start simulation for workflow visualization
-    startOrchestration(cmd);
-    if (!subIdMatch || !rgMatch) {
-      setSelectedView('orchestrator');
-    }
+    // Send the NLP prompt directly to the agentic workflow pipeline
+    // The Orchestrator agent will extract subscriptionId and resourceGroup from the prompt
+    setShowRealMigration(true);
+    setSelectedView('migration');
+    clearAgenticLogs();
+    processedLogCount.current = 0;
+
+    // Reset pipeline visuals to idle before starting
+    resetAgents();
+
+    // Start the real agentic workflow — AgentPipeline will update via the useEffect above
+    startWorkflow(cmd);
   };
 
   const handleAgentClick = (id: AgentType) => {
@@ -95,7 +159,7 @@ export default function Home() {
         ? agents[selectedView].logs 
         : [`[SYSTEM] Waiting for ${selectedView} logs...`];
 
-  const processing = activeAgent ? agents[activeAgent].status === 'processing' : false;
+  const processing = agenticRunning || (activeAgent ? agents[activeAgent].status === 'processing' : false);
 
   // Render different page content based on navigation
   const renderPageContent = () => {
@@ -108,6 +172,10 @@ export default function Home() {
         return <RefactoringPage />;
       case 'summary':
         return <SummaryPage agents={agents} />;
+      case 'report':
+        return <ReportPage />;
+      case 'observability':
+        return <ObservabilityPage />;
       case 'settings':
         return <SettingsPage />;
       case 'workflow':
@@ -148,24 +216,39 @@ export default function Home() {
                 
                 {/* Live Terminal (Takes 2/3 width on large screens) */}
                 <div className="lg:col-span-2 h-full">
-                    {/* Migration Status Badge */}
-                    {showRealMigration && migrationRunning && (
-                      <div className="mb-4 p-3 bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-lg flex items-center gap-3">
+                    {/* Agentic Pipeline Status Badge */}
+                    {showRealMigration && (agenticRunning || agenticStatus === 'completed' || agenticStatus === 'failed') && (
+                      <div className={`mb-4 p-3 bg-gradient-to-r ${agenticStatus === 'completed' ? 'from-green-50 to-emerald-50 border-green-200' : agenticStatus === 'failed' ? 'from-red-50 to-orange-50 border-red-200' : 'from-purple-50 to-blue-50 border-purple-200'} border rounded-lg flex items-center gap-3`}>
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                          <span className="text-sm font-semibold text-sky-700">
-                            Real-time Migration: {migrationStatus}
+                          <span className={`w-2 h-2 rounded-full ${agenticStatus === 'completed' ? 'bg-green-500' : agenticStatus === 'failed' ? 'bg-red-500' : 'bg-purple-500 animate-pulse'}`}></span>
+                          <span className={`text-sm font-semibold ${agenticStatus === 'completed' ? 'text-green-700' : agenticStatus === 'failed' ? 'text-red-700' : 'text-purple-700'}`}>
+                            Agentic Pipeline: {agenticCurrentAgent || agenticStatus} — {agenticProgress}%
                           </span>
                         </div>
-                        {migrationStatus === 'completed' && (
-                          <span className="ml-auto text-xs text-green-600 font-mono">✓ Export Complete</span>
+                        {agenticStatus === 'completed' && (
+                          <span className="ml-auto text-xs text-green-600 font-mono">✓ Pipeline Complete</span>
+                        )}
+                        {agenticStatus === 'failed' && (
+                          <span className="ml-auto text-xs text-red-600 font-mono">✗ Pipeline Failed</span>
                         )}
                       </div>
                     )}
                     
+                    {/* Endpoint URLs Info Bar */}
+                    <div className="mb-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                        API: <span className="text-gray-700">{config.workflow.baseUrl}</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                        MCP: <span className="text-gray-700">{config.mcpServer.baseUrl}</span>
+                      </span>
+                    </div>
+
                     <LiveTerminal 
-                        logs={showRealMigration && selectedView === 'migration' ? migrationLogs : logsToShow} 
-                        title={selectedView === 'global' ? 'Global Event Stream' : `Agent Context: ${selectedView.toUpperCase()}`}
+                        logs={showRealMigration && agenticLogs.length > 0 ? agenticLogs.map(l => `[${l.agent || 'SYSTEM'}] ${l.message}`) : logsToShow} 
+                        title={showRealMigration && agenticLogs.length > 0 ? 'Agentic Pipeline Progress' : selectedView === 'global' ? 'Global Event Stream' : `Agent Context: ${selectedView.toUpperCase()}`}
                     />
                 </div>
 
@@ -193,7 +276,7 @@ export default function Home() {
 
             {/* Disconnection Fallback */}
             {streamStatus === 'offline' && (
-                <ConnectivityGuard onReconnect={reconnect} />
+                <ConnectivityGuard status={streamStatus} onReconnect={reconnect} />
             )}
           </div>
         );

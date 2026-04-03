@@ -1,0 +1,32 @@
+# =============================================
+# FastAPI Server Dockerfile (Python)
+# =============================================
+FROM mcr.microsoft.com/azure-cli:latest
+
+WORKDIR /app
+
+# 1. Install System Dependencies
+RUN tdnf clean all && tdnf makecache && tdnf install -y \
+    wget \
+    tar \
+    gzip \
+    ca-certificates \
+    && tdnf clean all
+
+# 2. Install Pip and Python Dependencies
+COPY python/requirements.txt ./python/requirements.txt
+RUN wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py && \
+    python3 /tmp/get-pip.py && \
+    python3 -m pip install --no-cache-dir -r ./python/requirements.txt && \
+    rm /tmp/get-pip.py
+
+# 3. Copy Python application code
+COPY python/ ./python/
+
+# 4. Environment Setup
+ENV PYTHONUNBUFFERED=1
+ENV RUNNING_IN_CONTAINER=true
+
+EXPOSE 8000
+
+CMD ["python3", "-m", "uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/app/python/api"]

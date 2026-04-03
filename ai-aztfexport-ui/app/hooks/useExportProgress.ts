@@ -29,6 +29,8 @@ export const useExportProgress = (): UseExportProgressReturn => {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastEventTimeRef = useRef<number>(Date.now());
 
   const addLog = useCallback((log: ProgressLog) => {
     setState((prev) => ({
@@ -41,19 +43,42 @@ export const useExportProgress = (): UseExportProgressReturn => {
     // Close any existing connection
     closeProgressStream(eventSourceRef.current);
     eventSourceRef.current = null;
+    
+    // Clear old heartbeat timeout
+    if (heartbeatTimeoutRef.current) {
+      clearTimeout(heartbeatTimeoutRef.current);
+      heartbeatTimeoutRef.current = null;
+    }
 
+    lastEventTimeRef.current = Date.now();
     setState((prev) => ({ ...prev, status: 'connecting' }));
 
     const eventSource = createProgressStream(jobId, {
       onOpen: () => {
+        lastEventTimeRef.current = Date.now();
         setState((prev) => ({ ...prev, status: 'connected' }));
         addLog({
           type: 'info',
           message: 'Connected to export progress stream',
           timestamp: new Date().toISOString(),
         });
+        
+        // Start heartbeat monitoring
+        const checkHeartbeat = () => {
+          const timeSinceLastEvent = Date.now() - lastEventTimeRef.current;
+          if (timeSinceLastEvent > config.ui.sseHeartbeatInterval) {
+            addLog({
+              type: 'warning',
+              message: `No updates for ${Math.floor(timeSinceLastEvent / 1000)}s - connection may be stale`,
+              timestamp: new Date().toISOString(),
+            });
+          }
+          heartbeatTimeoutRef.current = setTimeout(checkHeartbeat, config.ui.sseHeartbeatInterval);
+        };
+        heartbeatTimeoutRef.current = setTimeout(checkHeartbeat, config.ui.sseHeartbeatInterval);
       },
       onConnected: (data) => {
+        lastEventTimeRef.current = Date.now();
         addLog({
           type: 'info',
           message: data.message || 'Connection established',
@@ -61,6 +86,7 @@ export const useExportProgress = (): UseExportProgressReturn => {
         });
       },
       onStdout: (data) => {
+        lastEventTimeRef.current = Date.now();
         addLog({
           type: 'stdout',
           message: data.message,
@@ -68,6 +94,7 @@ export const useExportProgress = (): UseExportProgressReturn => {
         });
       },
       onStderr: (data) => {
+        lastEventTimeRef.current = Date.now();
         addLog({
           type: 'stderr',
           message: data.message,
@@ -75,6 +102,11 @@ export const useExportProgress = (): UseExportProgressReturn => {
         });
       },
       onComplete: (data) => {
+        lastEventTimeRef.current = Date.now();
+        if (heartbeatTimeoutRef.current) {
+          clearTimeout(heartbeatTimeoutRef.current);
+          heartbeatTimeoutRef.current = null;
+        }
         setState((prev) => ({
           ...prev,
           status: 'completed',
@@ -122,7 +154,7 @@ export const useExportProgress = (): UseExportProgressReturn => {
     });
 
     eventSourceRef.current = eventSource;
-  }, [addLog, state.isRunning]);
+  }, [addLog, state.isRunning, config.ui.reconnectDelay]);
 
   const startExport = useCallback(async (subscriptionId: string, resourceGroup: string, prompt?: string) => {
     // Clear previous state
@@ -199,6 +231,11 @@ export const useExportProgress = (): UseExportProgressReturn => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
+      }
+      
+      if (heartbeatTimeoutRef.current) {
+        clearTimeout(heartbeatTimeoutRef.current);
+        heartbeatTimeoutRef.current = null;
       }
     };
   }, []);

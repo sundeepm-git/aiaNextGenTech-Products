@@ -190,6 +190,37 @@ function Wait-ForDeployment {
     Write-Host ""
 }
 
+function Wait-ForContainerAppReady {
+    <#
+    .SYNOPSIS
+        Waits until a container app has no active provisioning operations.
+    .DESCRIPTION
+        Polls the container app provisioningState until it is 'Succeeded'
+        (or a terminal state) before returning, so the next mutating
+        command will not hit ContainerAppOperationInProgress.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AppName,
+        [Parameter(Mandatory)][string]$RG,
+        [int]$MaxWaitSeconds = 120,
+        [int]$PollIntervalSeconds = 10
+    )
+
+    $waited = 0
+    while ($waited -lt $MaxWaitSeconds) {
+        $state = az containerapp show --name $AppName --resource-group $RG `
+            --query "properties.provisioningState" -o tsv 2>$null
+        if ($state -eq "Succeeded" -or $state -eq "Failed" -or $state -eq "Canceled") {
+            Write-Info "Container app '$AppName' provisioning state: $state"
+            return
+        }
+        Write-Info "Waiting for '$AppName' provisioning to finish (state: $state, ${waited}s elapsed)..."
+        Start-Sleep -Seconds $PollIntervalSeconds
+        $waited += $PollIntervalSeconds
+    }
+    Write-Warning "Timed out waiting for '$AppName' provisioning after ${MaxWaitSeconds}s — proceeding anyway"
+}
+
 # ===========================
 # LOAD .ENV VARIABLES
 # ===========================
@@ -226,6 +257,8 @@ if (Test-Path $envFile) {
                 "AZTFEXPORT_FOLDER"   { $script:AztfexportFolder = $envValue; $envVarsLoaded += $envName }
                 "CODE_REFACTORED_FOLDER" { $script:CodeRefactoredFolder = $envValue; $envVarsLoaded += $envName }
                 "ASSESSMENT_FOLDER"   { $script:AssessmentFolder = $envValue; $envVarsLoaded += $envName }
+                "AZURE_AI_PROJECT_ENDPOINT" { $script:AzureAiProjectEndpoint = $envValue; $envVarsLoaded += $envName }
+                "FOUNDRY_API_KEY"    { $script:FoundryApiKey = $envValue; $envVarsLoaded += $envName }
             }
         }
     }
@@ -422,7 +455,30 @@ $envExists = az containerapp env show `
     --resource-group $ResourceGroup `
     --query "name" -o tsv 2>$null
 
-if (-not $envExists) {
+# Also check provisioning state — if it's being deleted or failed, we must recreate
+$envState = ""
+if ($envExists) {
+    $envState = az containerapp env show `
+        --name $ContainerAppEnv `
+        --resource-group $ResourceGroup `
+        --query "properties.provisioningState" -o tsv 2>$null
+}
+
+if (-not $envExists -or $envState -in @("ScheduledForDelete", "Failed", "Canceled")) {
+    if ($envState -in @("ScheduledForDelete", "Failed", "Canceled")) {
+        Write-Warning "Container Apps Environment is in '$envState' state. Waiting for cleanup before recreating..."
+        $waitCount = 0
+        while ($waitCount -lt 24) {
+            Start-Sleep -Seconds 10
+            $waitCount++
+            $stillExists = az containerapp env show --name $ContainerAppEnv --resource-group $ResourceGroup --query "name" -o tsv 2>$null
+            if (-not $stillExists) {
+                Write-Success "Old environment removed"
+                break
+            }
+            Write-Info "  Waiting for environment deletion... ($($waitCount * 10)s)"
+        }
+    }
     Write-Info "Creating Container Apps Environment: $ContainerAppEnv"
     $maxAttempts = 3
     $attempt = 1
@@ -450,7 +506,7 @@ if (-not $envExists) {
         exit 1
     }
 } else {
-    Write-Success "Container Apps Environment exists"
+    Write-Success "Container Apps Environment exists (state: $envState)"
 }
 
 Write-Success "All Azure resources are ready"
@@ -591,9 +647,10 @@ if ($StorageAccountName) {
     $envVars += "AZURE_STORAGE_ACCOUNT=$StorageAccountName"
     $envVars += "storageAccount=$StorageAccountName"
 }
-if ($ContainerName) {
-    $envVars += "AZURE_STORAGE_CONTAINER=$ContainerName"
-}
+# NOTE: Do NOT set a single AZURE_STORAGE_CONTAINER — each process uses its own distinct container:
+#   Assessment  -> ASSESSMENT_FOLDER     (default: assessment-reports)
+#   Export      -> AZTFEXPORT_FOLDER     (default: aztfexport)
+#   Refactor    -> CODE_REFACTORED_FOLDER (default: code-refactored)
 $storageRG = if ($ResourceGroup) { $ResourceGroup } else { "rg-mcp-servers" }
 $envVars += "storageAccountRG=$storageRG"
 
@@ -623,9 +680,10 @@ if ($script:GitHubBranch) { $envVars += "GITHUB_BRANCH=$($script:GitHubBranch)" 
 
 # Output destination and folder configuration
 if ($script:OutputDestination)  { $envVars += "OUTPUT_DESTINATION=$($script:OutputDestination)" }
-if ($script:AztfexportFolder)   { $envVars += "AZTFEXPORT_FOLDER=$($script:AztfexportFolder)" }
-if ($script:CodeRefactoredFolder) { $envVars += "CODE_REFACTORED_FOLDER=$($script:CodeRefactoredFolder)" }
-if ($script:AssessmentFolder)   { $envVars += "ASSESSMENT_FOLDER=$($script:AssessmentFolder)" }
+# CRITICAL: Always set container-specific folder names to enforce isolation (prevent cross-contamination)
+$envVars += "AZTFEXPORT_FOLDER=$(if ($script:AztfexportFolder) { $script:AztfexportFolder } else { 'aztfexport' })"
+$envVars += "CODE_REFACTORED_FOLDER=$(if ($script:CodeRefactoredFolder) { $script:CodeRefactoredFolder } else { 'code-refactored' })"
+$envVars += "ASSESSMENT_FOLDER=$(if ($script:AssessmentFolder) { $script:AssessmentFolder } else { 'assessment-reports' })"
 
 # Script paths inside the container
 $envVars += "REFACTOR_SCRIPT_PATH=./python/refactor.py"
@@ -660,6 +718,9 @@ if ($appExists) {
         exit 1
     }
 
+    # Wait for registry-set provisioning to finish before issuing next update
+    Wait-ForContainerAppReady -AppName $ContainerAppName -RG $ResourceGroup
+
     # Build the az command with environment variables as separate arguments
     $azArgs = @(
         'containerapp', 'update',
@@ -679,17 +740,24 @@ if ($appExists) {
         $azArgs += $envVar
     }
     
-    # Add the secret during the update if it exists
-    if ($ClientSecret) {
-        $azArgs += '--set-secrets'
-        $azArgs += "azure-client-secret=$ClientSecret"
-    }
-    
     $azArgs += '--output'
     $azArgs += 'none'
     
     # Execute the command
     & az @azArgs
+
+    # Wait for update provisioning to finish before setting secrets
+    Wait-ForContainerAppReady -AppName $ContainerAppName -RG $ResourceGroup
+
+    # Set secrets separately (az containerapp update does not support --set-secrets)
+    if ($ClientSecret) {
+        Write-Info "Setting container app secrets..."
+        az containerapp secret set `
+            --name $ContainerAppName `
+            --resource-group $ResourceGroup `
+            --secrets "azure-client-secret=$ClientSecret" `
+            --output none 2>$null
+    }
 } else {
     Write-Info "Creating new container app..."
     
@@ -871,37 +939,314 @@ if (-not $toolsSuccess) {
 }
 
 # ===========================
-# SUMMARY
+# SUMMARY — MCP Server
+# ===========================
+
+$MCP_URL = az containerapp show `
+    --name $ContainerAppName `
+    --resource-group $ResourceGroup `
+    --query properties.configuration.ingress.fqdn `
+    --output tsv
+
+Write-Success "MCP Server deployed: https://$MCP_URL"
+
+# ===========================
+# STEP 10: DEPLOY API CONTAINER APP
+# ===========================
+
+Write-Step "Building & deploying FastAPI container app" "Cyan"
+
+$API_APP_NAME = "aztf-api-app"
+$API_IMAGE_NAME = "aztf-api-server"
+$API_IMAGE_FULL = "${ACR_LOGIN_SERVER}/${API_IMAGE_NAME}:${ImageTag}"
+
+# Build API image from Dockerfile.api (same build context = apps-mcp-server)
+Write-Info "Building API image..."
+docker build --no-cache -f Dockerfile.api -t "${API_IMAGE_NAME}:${ImageTag}" .
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "API Docker build failed"
+    exit 1
+}
+
+Write-Info "Tagging & pushing API image..."
+docker tag "${API_IMAGE_NAME}:${ImageTag}" $API_IMAGE_FULL
+docker push $API_IMAGE_FULL
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "API image push failed"
+    exit 1
+}
+
+# Build env vars for API container
+$apiEnvVars = @(
+    "PYTHONUNBUFFERED=1"
+    "RUNNING_IN_CONTAINER=true"
+)
+if ($StorageAccountName) {
+    $apiEnvVars += "AZURE_STORAGE_ACCOUNT=$StorageAccountName"
+    $apiEnvVars += "storageAccount=$StorageAccountName"
+}
+# Per-process container names passed via ASSESSMENT_FOLDER, AZTFEXPORT_FOLDER, CODE_REFACTORED_FOLDER
+$apiEnvVars += "storageAccountRG=$ResourceGroup"
+if ($SubscriptionId) {
+    $apiEnvVars += "AZURE_SUBSCRIPTION_ID=$SubscriptionId"
+    $apiEnvVars += "ARM_SUBSCRIPTION_ID=$SubscriptionId"
+}
+if ($TenantId) {
+    $apiEnvVars += "AZURE_TENANT_ID=$TenantId"
+    $apiEnvVars += "ARM_TENANT_ID=$TenantId"
+}
+if ($ClientId) {
+    $apiEnvVars += "AZURE_CLIENT_ID=$ClientId"
+    $apiEnvVars += "ARM_CLIENT_ID=$ClientId"
+}
+if ($ClientSecret) {
+    $apiEnvVars += "AZURE_CLIENT_SECRET=secretref:azure-client-secret"
+    $apiEnvVars += "ARM_CLIENT_SECRET=secretref:azure-client-secret"
+}
+# MCP server URL so API can call it if needed
+$apiEnvVars += "MCP_SERVER_URL=https://$MCP_URL"
+
+# Azure AI Foundry endpoint — required by the sequential workflow (aztf-sequential-wf.py)
+if ($script:AzureAiProjectEndpoint) {
+    $apiEnvVars += "AZURE_AI_PROJECT_ENDPOINT=$($script:AzureAiProjectEndpoint)"
+    Write-Info "Including AZURE_AI_PROJECT_ENDPOINT in API env vars"
+}
+if ($script:FoundryApiKey) {
+    $apiEnvVars += "FOUNDRY_API_KEY=secretref:foundry-api-key"
+}
+
+# Check if API container app exists
+$apiAppExists = az containerapp show --name $API_APP_NAME --resource-group $ResourceGroup --query "name" -o tsv 2>$null
+
+if ($apiAppExists) {
+    Write-Info "Updating existing API container app..."
+    az containerapp registry set `
+        --name $API_APP_NAME `
+        --resource-group $ResourceGroup `
+        --server $ACR_LOGIN_SERVER `
+        --username $ACR_USERNAME `
+        --password $ACR_PASSWORD `
+        --output none
+
+    # Wait for registry-set provisioning to finish before issuing next update
+    Wait-ForContainerAppReady -AppName $API_APP_NAME -RG $ResourceGroup
+
+    $azArgs = @(
+        'containerapp', 'update',
+        '--name', $API_APP_NAME,
+        '--resource-group', $ResourceGroup,
+        '--image', $API_IMAGE_FULL,
+        '--revision-suffix', "r$(Get-Date -Format 'HHmmss')",
+        '--cpu', '0.5',
+        '--memory', '1.0Gi',
+        '--min-replicas', '1',
+        '--max-replicas', '3',
+        '--set-env-vars'
+    )
+    foreach ($envVar in $apiEnvVars) { $azArgs += $envVar }
+    $azArgs += '--output'; $azArgs += 'none'
+    & az @azArgs
+
+    # Wait for update provisioning to finish before setting secrets
+    Wait-ForContainerAppReady -AppName $API_APP_NAME -RG $ResourceGroup
+
+    # Set secrets separately (az containerapp update does not support --set-secrets)
+    $apiSecrets = @()
+    if ($ClientSecret)          { $apiSecrets += "azure-client-secret=$ClientSecret" }
+    if ($script:FoundryApiKey)  { $apiSecrets += "foundry-api-key=$($script:FoundryApiKey)" }
+    if ($apiSecrets.Count -gt 0) {
+        Write-Info "Setting API container app secrets..."
+        $secretArgs = @('containerapp', 'secret', 'set', '--name', $API_APP_NAME, '--resource-group', $ResourceGroup, '--secrets')
+        foreach ($s in $apiSecrets) { $secretArgs += $s }
+        $secretArgs += '--output'; $secretArgs += 'none'
+        & az @secretArgs 2>$null
+    }
+} else {
+    Write-Info "Creating new API container app..."
+    $azArgs = @(
+        'containerapp', 'create',
+        '--name', $API_APP_NAME,
+        '--resource-group', $ResourceGroup,
+        '--environment', $ContainerAppEnv,
+        '--image', $API_IMAGE_FULL,
+        '--target-port', '8000',
+        '--ingress', 'external',
+        '--registry-server', $ACR_LOGIN_SERVER,
+        '--registry-username', $ACR_USERNAME,
+        '--registry-password', $ACR_PASSWORD,
+        '--cpu', '0.5',
+        '--memory', '1.0Gi',
+        '--min-replicas', '1',
+        '--max-replicas', '3',
+        '--system-assigned',
+        '--env-vars'
+    )
+    foreach ($envVar in $apiEnvVars) { $azArgs += $envVar }
+    $createSecrets = @()
+    if ($ClientSecret)          { $createSecrets += "azure-client-secret=$ClientSecret" }
+    if ($script:FoundryApiKey)  { $createSecrets += "foundry-api-key=$($script:FoundryApiKey)" }
+    if ($createSecrets.Count -gt 0) { $azArgs += '--secrets'; foreach ($s in $createSecrets) { $azArgs += $s } }
+    $azArgs += '--output'; $azArgs += 'none'
+    & az @azArgs
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "API container app deployment failed"
+    exit 1
+}
+
+# Wait for API to be ready
+Write-Info "Waiting for API container to become ready..."
+$apiWait = 0
+while ($apiWait -lt 60) {
+    Start-Sleep -Seconds 5; $apiWait += 5
+    $apiReady = az containerapp show --name $API_APP_NAME --resource-group $ResourceGroup `
+        --query "properties.latestReadyRevisionName" --output tsv 2>$null
+    if ($apiReady) { Write-Success "API container ready: $apiReady"; break }
+    Write-Info "Waiting... ($apiWait seconds)"
+}
+
+$API_URL = az containerapp show --name $API_APP_NAME --resource-group $ResourceGroup `
+    --query properties.configuration.ingress.fqdn --output tsv
+Write-Success "API Server deployed: https://$API_URL"
+
+# ===========================
+# STEP 11: DEPLOY UI CONTAINER APP
+# ===========================
+
+Write-Step "Building & deploying Next.js UI container app" "Cyan"
+
+$UI_APP_NAME = "aztf-ui-app"
+$UI_IMAGE_NAME = "aztf-ui"
+$UI_IMAGE_FULL = "${ACR_LOGIN_SERVER}/${UI_IMAGE_NAME}:${ImageTag}"
+
+# Resolve path to UI source (outside apps-mcp-server)
+$uiSourcePath = Resolve-Path (Join-Path $PSScriptRoot "..\..\..\ai-aztfexport-ui")
+Write-Info "UI source: $uiSourcePath"
+
+# Build UI image — pass API and MCP URLs as build args so NEXT_PUBLIC_ vars are baked in
+Write-Info "Building UI image with API_URL=https://$API_URL and MCP_URL=https://$MCP_URL..."
+docker build --no-cache `
+    --build-arg "NEXT_PUBLIC_WORKFLOW_API_URL=https://$API_URL" `
+    --build-arg "NEXT_PUBLIC_MCP_SERVER_URL=https://$MCP_URL" `
+    -t "${UI_IMAGE_NAME}:${ImageTag}" `
+    "$uiSourcePath"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "UI Docker build failed"
+    exit 1
+}
+
+Write-Info "Tagging & pushing UI image..."
+docker tag "${UI_IMAGE_NAME}:${ImageTag}" $UI_IMAGE_FULL
+docker push $UI_IMAGE_FULL
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "UI image push failed"
+    exit 1
+}
+
+# Check if UI container app exists
+$uiAppExists = az containerapp show --name $UI_APP_NAME --resource-group $ResourceGroup --query "name" -o tsv 2>$null
+
+if ($uiAppExists) {
+    Write-Info "Updating existing UI container app..."
+    az containerapp registry set `
+        --name $UI_APP_NAME `
+        --resource-group $ResourceGroup `
+        --server $ACR_LOGIN_SERVER `
+        --username $ACR_USERNAME `
+        --password $ACR_PASSWORD `
+        --output none
+
+    $azArgs = @(
+        'containerapp', 'update',
+        '--name', $UI_APP_NAME,
+        '--resource-group', $ResourceGroup,
+        '--image', $UI_IMAGE_FULL,
+        '--revision-suffix', "r$(Get-Date -Format 'HHmmss')",
+        '--cpu', '0.5',
+        '--memory', '1.0Gi',
+        '--min-replicas', '1',
+        '--max-replicas', '3',
+        '--output', 'none'
+    )
+    & az @azArgs
+} else {
+    Write-Info "Creating new UI container app..."
+    $azArgs = @(
+        'containerapp', 'create',
+        '--name', $UI_APP_NAME,
+        '--resource-group', $ResourceGroup,
+        '--environment', $ContainerAppEnv,
+        '--image', $UI_IMAGE_FULL,
+        '--target-port', '3000',
+        '--ingress', 'external',
+        '--registry-server', $ACR_LOGIN_SERVER,
+        '--registry-username', $ACR_USERNAME,
+        '--registry-password', $ACR_PASSWORD,
+        '--cpu', '0.5',
+        '--memory', '1.0Gi',
+        '--min-replicas', '1',
+        '--max-replicas', '3',
+        '--output', 'none'
+    )
+    & az @azArgs
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "UI container app deployment failed"
+    exit 1
+}
+
+# Wait for UI to be ready
+Write-Info "Waiting for UI container to become ready..."
+$uiWait = 0
+while ($uiWait -lt 60) {
+    Start-Sleep -Seconds 5; $uiWait += 5
+    $uiReady = az containerapp show --name $UI_APP_NAME --resource-group $ResourceGroup `
+        --query "properties.latestReadyRevisionName" --output tsv 2>$null
+    if ($uiReady) { Write-Success "UI container ready: $uiReady"; break }
+    Write-Info "Waiting... ($uiWait seconds)"
+}
+
+$UI_URL = az containerapp show --name $UI_APP_NAME --resource-group $ResourceGroup `
+    --query properties.configuration.ingress.fqdn --output tsv
+Write-Success "UI deployed: https://$UI_URL"
+
+# ===========================
+# FINAL SUMMARY — ALL THREE SERVICES
 # ===========================
 
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "   DEPLOYMENT COMPLETE" -ForegroundColor Green
+Write-Host "   DEPLOYMENT COMPLETE — ALL 3 CONTAINER APPS" -ForegroundColor Green
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
-Write-Host "App URL:      https://$APP_URL" -ForegroundColor Cyan
-Write-Host "Health:       https://$APP_URL/health" -ForegroundColor Cyan
-Write-Host "Tools:        https://$APP_URL/tools" -ForegroundColor Cyan
-Write-Host "SSE:          https://$APP_URL/sse" -ForegroundColor Cyan
+Write-Host "  UI (React/Next.js)     : https://$UI_URL" -ForegroundColor Cyan
+Write-Host "  API (FastAPI)          : https://$API_URL" -ForegroundColor Cyan
+Write-Host "  MCP Server (Node.js)   : https://$MCP_URL" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Image:        $IMAGE_FULL" -ForegroundColor Yellow
+Write-Host "  Quick-Access Links:" -ForegroundColor Yellow
+Write-Host "    UI Home              : https://$UI_URL" -ForegroundColor White
+Write-Host "    API Health           : https://${API_URL}/health" -ForegroundColor White
+Write-Host "    API Docs (Swagger)   : https://${API_URL}/docs" -ForegroundColor White
+Write-Host "    MCP Health           : https://${MCP_URL}/health" -ForegroundColor White
+Write-Host "    MCP Tools            : https://${MCP_URL}/tools" -ForegroundColor White
+Write-Host "    MCP SSE              : https://${MCP_URL}/sse" -ForegroundColor White
 Write-Host ""
+Write-Host "  Images:" -ForegroundColor Yellow
+Write-Host "    MCP : $IMAGE_FULL" -ForegroundColor Gray
+Write-Host "    API : $API_IMAGE_FULL" -ForegroundColor Gray
+Write-Host "    UI  : $UI_IMAGE_FULL" -ForegroundColor Gray
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
 
 if ($toolsSuccess) {
     Write-Host "✓ All systems operational!" -ForegroundColor Green
 } else {
-    Write-Host "⚠ Deployment completed but verification had issues" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Debug commands:" -ForegroundColor Yellow
-    Write-Host "  # Follow live logs:" -ForegroundColor Gray
+    Write-Host "⚠ MCP tool verification had issues — check logs" -ForegroundColor Yellow
     Write-Host "  az containerapp logs show --name $ContainerAppName --resource-group $ResourceGroup --follow" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  # List revisions:" -ForegroundColor Gray
-    Write-Host "  az containerapp revision list --name $ContainerAppName --resource-group $ResourceGroup --output table" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  # Restart container:" -ForegroundColor Gray
-    Write-Host "  az containerapp revision restart --name $ContainerAppName --resource-group $ResourceGroup --revision $latestReady" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  # Check container details:" -ForegroundColor Gray
-    Write-Host "  az containerapp show --name $ContainerAppName --resource-group $ResourceGroup" -ForegroundColor Cyan
 }

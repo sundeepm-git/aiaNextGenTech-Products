@@ -16,6 +16,8 @@ interface UseAgentStreamReturn {
   startOrchestration: (command: string) => void;
   reconnect: () => void;
   setActiveAgent: (id: AgentType) => void;
+  updateAgent: (id: AgentType, update: Partial<AgentState>) => void;
+  resetAgents: () => void;
   terminalLogs: string[];
 }
 
@@ -55,6 +57,12 @@ export const useAgentStream = (): UseAgentStreamReturn => {
       ...prev,
       [id]: { ...prev[id], ...update }
     }));
+  }, []);
+
+  const resetAgents = useCallback(() => {
+    setAgents(INITIAL_AGENTS);
+    setActiveAgentState(null);
+    setTerminalLogs([]);
   }, []);
 
   // Simulation Logic for Demo Purposes
@@ -181,6 +189,8 @@ export const useAgentStream = (): UseAgentStreamReturn => {
     startOrchestration: handleOrchestration,
     reconnect,
     setActiveAgent,
+    updateAgent,
+    resetAgents,
     terminalLogs
   };
 };

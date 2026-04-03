@@ -1,9 +1,9 @@
 'use client';
 
-import { Workflow, FileSearch, GitBranch, Code2, ClipboardList, LayoutDashboard, Settings } from 'lucide-react';
+import { Workflow, FileSearch, GitBranch, Code2, ClipboardList, LayoutDashboard, Settings, FileBarChart2, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type PageType = 'workflow' | 'assessment' | 'migration' | 'refactoring' | 'summary' | 'settings';
+export type PageType = 'workflow' | 'assessment' | 'migration' | 'refactoring' | 'summary' | 'report' | 'observability' | 'settings';
 
 interface SidebarProps {
   currentPage: PageType;
@@ -14,9 +14,9 @@ interface SidebarProps {
 const menuItems = [
   { id: 'workflow' as PageType, label: 'Workflow', icon: Workflow },
   { id: 'assessment' as PageType, label: 'Assessment', icon: FileSearch },
-  { id: 'migration' as PageType, label: 'Migration', icon: GitBranch },
-  { id: 'refactoring' as PageType, label: 'Refactoring', icon: Code2 },
   { id: 'summary' as PageType, label: 'Summary', icon: ClipboardList },
+  { id: 'report' as PageType, label: 'Reports', icon: FileBarChart2 },
+  { id: 'observability' as PageType, label: 'Observability', icon: Activity },
 ];
 
 export default function Sidebar({ currentPage, onPageChange, isVisible }: SidebarProps) {

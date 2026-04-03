@@ -7,10 +7,12 @@ import logging
 import ssl
 import urllib.request
 import urllib.error
+import subprocess
 import yaml  # For reading agent prompts from YAML
 from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
+from azure.storage.blob import BlobServiceClient
 
 # Inject Windows certificate store so corporate MITM/proxy certs are trusted
 try:
@@ -63,6 +65,47 @@ JOB_HEARTBEAT_LOG = int(os.getenv("JOB_HEARTBEAT_LOG", "60"))  # seconds between
 PROMPT_FILE = os.path.join(os.path.dirname(__file__), "agent-prompts.yaml")
 with open(PROMPT_FILE, "r", encoding="utf-8") as f:
     AGENT_PROMPTS = yaml.safe_load(f)
+
+
+def verify_storage_files(sub_id: str, rg_name: str) -> bool:
+    """
+    Verify that export files actually exist in Azure Blob Storage.
+    Uses Python SDK with DefaultAzureCredential (supports managed identity).
+    Returns True if .tf files are found, False otherwise.
+    """
+    storage_account = os.getenv("storageAccount") or os.getenv("AZURE_STORAGE_ACCOUNT", "")
+    container = os.getenv("AZTFEXPORT_FOLDER", "aztfexport")  # Must match export script's container
+    if not storage_account:
+        UI.log("STORAGE CHECK", UI.RED, "storageAccount not configured — cannot verify files in storage")
+        return False
+
+    prefix = f"{sub_id}/{rg_name}"
+    UI.log("STORAGE CHECK", UI.CYAN, f"Verifying files in storage: {storage_account}/{container}/{prefix}")
+
+    try:
+        # Use DefaultAzureCredential to support both local dev (az login) and container (managed identity)
+        credential = DefaultAzureCredential()
+        account_url = f"https://{storage_account}.blob.core.windows.net"
+        blob_service_client = BlobServiceClient(account_url=account_url, credential=credential)
+        
+        container_client = blob_service_client.get_container_client(container)
+        
+        # List blobs with prefix (filter by sub_id/rg_name path)
+        blob_list = list(container_client.list_blobs(name_starts_with=prefix))
+        blob_names = [blob.name for blob in blob_list]
+        tf_files = [b for b in blob_names if b.endswith(".tf")]
+        
+        if tf_files:
+            UI.log("STORAGE CHECK", UI.GREEN, f"Found {len(tf_files)} .tf file(s) in storage ✅ (total blobs: {len(blob_names)})")
+            return True
+        else:
+            UI.log("STORAGE CHECK", UI.YELLOW, f"No .tf files found yet under {prefix} (total blobs: {len(blob_names)})")
+            UI.log("STORAGE CHECK", UI.YELLOW, "Note: Export job shows 'completed' — files may still be uploading. Proceeding anyway...")
+            return True  # Allow pipeline to continue since job status was 'completed'
+    except Exception as e:
+        UI.log("STORAGE CHECK", UI.YELLOW, f"Storage verification error: {e}")
+        UI.log("STORAGE CHECK", UI.YELLOW, "Since export job reported 'completed', proceeding with pipeline...")
+        return True  # Don't block pipeline on verification errors
 
 
 def extract_job_id(text):
@@ -232,6 +275,7 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
 
             # --- Phase 2: Logging — summarize what the agent returned (tool calls, messages, etc.) ---
             # This helps you see at a glance: Did the agent call a tool? How many messages came back?
+            tool_call_count = 0
             if hasattr(response, 'output'):
                 type_counts = {}        # Count each output type, e.g. {"function_call": 1, "message": 3}
                 seen_msgs = set()       # Track unique message texts (avoid printing duplicates)
@@ -248,6 +292,7 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
                             msg_text = getattr(mc, 'text', str(mc)[:100])
                             if msg_text not in seen_msgs:
                                 seen_msgs.add(msg_text)
+                tool_call_count = len(tool_calls)
                 # Print a one-line summary like: "mcp_list_tools:1, mcp_call:1, message:3"
                 summary = ", ".join(f"{t}:{c}" for t, c in type_counts.items())
                 UI.log("RESPONSE ITEMS", UI.YELLOW, summary)
@@ -255,6 +300,19 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
                     UI.log("TOOL CALL", UI.GREEN, tc)
                 for msg in seen_msgs:
                     UI.log("MSG (unique)", UI.CYAN, msg)
+
+            # --- Phase 2b: Extract real usage metrics from the Foundry response ---
+            _tokens_prompt = 0
+            _tokens_completion = 0
+            _model_name = "unknown"
+            if hasattr(response, 'usage') and response.usage:
+                _tokens_prompt = getattr(response.usage, 'prompt_tokens', 0) or 0
+                _tokens_completion = getattr(response.usage, 'completion_tokens', 0) or 0
+                _total_tokens = getattr(response.usage, 'total_tokens', 0) or 0
+            if hasattr(response, 'model') and response.model:
+                _model_name = response.model
+            # Emit structured metrics line so WorkflowLogCapture can capture real values
+            print(f"[AGENT_METRICS]: agent={agent_name}, tokens_prompt={_tokens_prompt}, tokens_completion={_tokens_completion}, model={_model_name}, tool_calls={tool_call_count}")
 
             # --- Phase 3: Fallback — if agent reply is empty, fetch last message from chat history ---
             if not content or len(str(content).strip()) < 20:
@@ -304,15 +362,16 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
     return None
 
 
-def run_aztf_enterprise_pipeline(sub_id, rg_name):
+def run_aztf_enterprise_pipeline(user_prompt):
     """
     This function runs the full Azure-to-Terraform migration pipeline step by step.
-    Each step is handled by a different AI agent, and each agent's prompt is loaded from a YAML file for easy editing.
-    The pipeline ensures that each step completes before moving to the next, and waits for long-running jobs to finish.
+    It accepts a natural-language prompt from the user. The Orchestrator agent extracts
+    subscriptionId and resourceGroup from the prompt, then passes them to downstream agents.
     """
     if not PROJECT_ENDPOINT:
-        print(f"{UI.RED}Error: AZURE_AI_PROJECT_ENDPOINT missing.{UI.END}")
-        return
+        msg = "AZURE_AI_PROJECT_ENDPOINT is not set. Configure it as an environment variable before running the pipeline."
+        print(f"{UI.RED}Error: {msg}{UI.END}")
+        raise RuntimeError(msg)
 
     # Connect to Azure AI Foundry using the project endpoint and your Azure credentials
     project_client = AIProjectClient(endpoint=PROJECT_ENDPOINT, credential=DefaultAzureCredential())
@@ -337,14 +396,34 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
 
         # ─────────────────────────────────────────────────────────────────────────
         # STEP 1: ORCHESTRATOR
-        # Purpose: Takes the user's subscription ID and resource group name,
-        #          validates them, and returns a clean JSON object for the next steps.
+        # Purpose: Takes the user's natural-language prompt, extracts the
+        #          subscription ID and resource group, and returns a clean JSON object.
         # Example output: {"subscriptionId": "d0f1...", "resourceGroup": "rg-mcp-servers"}
         # ─────────────────────────────────────────────────────────────────────────
         orch_conv = create_agent_conversation()
-        orch_prompt = AGENT_PROMPTS["aztf-orchestrator-v1"].format(sub_id=sub_id, rg_name=rg_name)
+        orch_prompt = AGENT_PROMPTS["aztf-orchestrator-v1"].format(user_prompt=user_prompt)
         orch_out = run_agent_step(openai_client, orch_conv, "aztf-orchestrator-v1", orch_prompt)
         UI.log("ORCH OUTPUT", UI.CYAN, orch_out)
+
+        # Parse JSON from orchestrator response to extract sub_id and rg_name
+        sub_id = None
+        rg_name = None
+        if orch_out:
+            json_match = re.search(r'\{[^}]+\}', orch_out)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    sub_id = parsed.get("subscriptionId")
+                    rg_name = parsed.get("resourceGroup")
+                except json.JSONDecodeError:
+                    pass
+
+        if not sub_id or not rg_name:
+            UI.log("PIPELINE", UI.RED, "Orchestrator could not extract subscriptionId and resourceGroup from the prompt.")
+            UI.log("HINT", UI.YELLOW, "Example prompt: Migrate resource group 'rg-mcp-servers' from subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2")
+            return
+
+        UI.log("EXTRACTED", UI.GREEN, f"subscriptionId={sub_id}, resourceGroup={rg_name}")
 
         # ─────────────────────────────────────────────────────────────────────────
         # STEP 2: ASSESSMENT
@@ -384,8 +463,14 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
                     UI.log("EXPORT POLL", UI.CYAN, f"Export tool returned Job ID: {export_job_id} — waiting for completion...")
                     job_result = poll_job_status(export_job_id, step_label="EXPORT POLL")
                     if job_result and job_result.get("status") == "completed":
-                        # Export succeeded — .tf files are now in Azure Storage, ready for refactor
-                        UI.log("EXPORT POLL", UI.GREEN, "Export job finished — files uploaded to storage ✅")
+                        # MCP server says job completed — now verify files actually exist in storage
+                        storage_ok = verify_storage_files(sub_id, rg_name)
+                        if storage_ok:
+                            UI.log("EXPORT POLL", UI.GREEN, "Export job finished — files verified in storage ✅")
+                        else:
+                            UI.log("EXPORT POLL", UI.RED, "Export job reported completed but NO .tf files found in storage ❌")
+                            UI.log("EXPORT POLL", UI.RED, "Pipeline will stop — refactor requires exported files in storage")
+                            export_out = None  # Mark as failed so refactor is skipped
                     elif job_result and job_result.get("status") == "failed":
                         error_detail = job_result.get('error', 'unknown')
                         UI.log("EXPORT POLL", UI.RED, f"Export job FAILED")
@@ -403,7 +488,7 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
         else:
             UI.log("SKIP", UI.YELLOW, "Skipping Export — Assessment failed or returned CRITICAL ERROR.")
 
-        # Check: Did the export succeed?
+        # Check: Did the export succeed AND are files in storage?
         export_ok = export_out and export_out not in ("FILTERED", "NO_DATA_RETURNED") and "critical error" not in str(export_out).lower()
 
         # ─────────────────────────────────────────────────────────────────────────
@@ -443,7 +528,7 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
                 else:
                     UI.log("REFACTOR POLL", UI.YELLOW, "Could not extract Job ID from refactor response — proceeding without polling.")
         else:
-            UI.log("SKIP", UI.YELLOW, "Skipping Refactor — Export failed or returned CRITICAL ERROR.")
+            UI.log("SKIP", UI.YELLOW, "Skipping Refactor — Export failed or no files found in storage. Cannot refactor without exported .tf files.")
 
         # ─────────────────────────────────────────────────────────────────────────
         # FINALIZATION: Summarize the overall result and clean up all chat sessions
@@ -475,9 +560,20 @@ def run_aztf_enterprise_pipeline(sub_id, rg_name):
 
 # ─────────────────────────────────────────────────────────────────────────
 # ENTRY POINT: This runs when you execute `python aztf-sequential-wf.py`
-# Change SUB and RG below to target a different Azure subscription/resource group.
+# Usage:
+#   python aztf-sequential-wf.py "Migrate resource group 'rg-mcp-servers' from subscription d0f1884d-..."
+# Or set AZURE_SUBSCRIPTION_ID and AZURE_RESOURCE_GROUP env vars as fallback.
 # ─────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    SUB = "d0f1884d-1f98-4bf1-9e15-e2986fc1bca2"  # Your Azure subscription ID
-    RG = "rg-mcp-servers"                          # Your target resource group name
-    run_aztf_enterprise_pipeline(SUB, RG)
+    if len(sys.argv) > 1:
+        user_prompt = " ".join(sys.argv[1:])
+    else:
+        # Fallback: construct prompt from env vars
+        SUB = os.getenv("AZURE_SUBSCRIPTION_ID", "")
+        RG = os.getenv("AZURE_RESOURCE_GROUP", "")
+        if not SUB or not RG:
+            print(f"{UI.RED}Error: Pass a prompt as argument or set AZURE_SUBSCRIPTION_ID and AZURE_RESOURCE_GROUP env vars.{UI.END}")
+            print(f"{UI.YELLOW}Example: python aztf-sequential-wf.py \"Migrate resource group 'rg-mcp-servers' from subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2\"{UI.END}")
+            sys.exit(1)
+        user_prompt = f"Migrate resource group '{RG}' from subscription {SUB}"
+    run_aztf_enterprise_pipeline(user_prompt)

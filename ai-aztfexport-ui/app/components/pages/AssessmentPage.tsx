@@ -1,186 +1,285 @@
 'use client';
 
-import { useState } from 'react';
-import { Play, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { ArrowRight, Sparkles, Loader2, CheckCircle2, AlertCircle, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { config } from '@/app/services/config';
+
+interface LogEntry {
+  level: string;
+  message: string;
+  agent?: string;
+  timestamp: string;
+}
+
+// Regex to extract subscription ID (UUID) and resource group from free-text prompt
+const SUB_RE = /(?:subscription\s*(?:id)?[:\-–]?\s*)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const SUB_RE_BARE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const RG_RE = /(?:resource\s*group\s*[:\-–]?\s*)([^\s,]+)/i;
+
+function extractParams(prompt: string): { subscriptionId: string | null; resourceGroup: string | null } {
+  const subMatch = prompt.match(SUB_RE) || prompt.match(SUB_RE_BARE);
+  const rgMatch = prompt.match(RG_RE);
+  return {
+    subscriptionId: subMatch ? subMatch[1] : null,
+    resourceGroup: rgMatch ? rgMatch[1] : null,
+  };
+}
+
+const SUGGESTIONS = [
+  { label: "🔍 Assess Default", value: "Assess subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 and resource group rg-mcp-servers" },
+  { label: "Assess Infra RG", value: "Run assessment for subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 resource group rg-genai-infra-0014" },
+];
 
 export default function AssessmentPage() {
-  const [prompt, setPrompt] = useState('');
+  const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [extractedSub, setExtractedSub] = useState<string | null>(null);
+  const [extractedRg, setExtractedRg] = useState<string | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
-  const predefinedPrompt = "Generate HTML assessment report for Azure subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 and resource group rg-production";
+  // Auto-scroll logs
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
-  const handleAssess = async () => {
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, []);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim() || isRunning) return;
+
+    const { subscriptionId, resourceGroup } = extractParams(input);
+
+    // Validate both are present
+    const missing: string[] = [];
+    if (!subscriptionId) missing.push('Subscription ID');
+    if (!resourceGroup) missing.push('Resource Group');
+    if (missing.length > 0) {
+      setError(`${missing.join(' and ')} is missing from your prompt. Please include both a subscription ID (UUID) and resource group name.\n\nExample: "Assess subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2 and resource group rg-mcp-servers"`);
+      return;
+    }
+
+    setExtractedSub(subscriptionId);
+    setExtractedRg(resourceGroup);
     setIsRunning(true);
     setError(null);
-    
+    setLogs([]);
+    setStatus(null);
+    setJobId(null);
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      setResult({
-        subscriptionId: 'd0f1884d-1f98-4bf1-9e15-e2986fc1bca2',
-        resourceGroup: 'rg-production',
-        totalResources: 247,
-        supported: 231,
-        unsupported: 16,
-        resourceGroups: 12,
-        summary: 'Subscription is ready for migration with 93.5% compatibility',
-        htmlReportPath: `Assessment-${subscriptionId}-${resourceGroup}.html`,
-        warnings: [
-          'Some App Service plans use deprecated SKUs',
-          '3 Virtual Machines require manual intervention'
-        ]
+      const res = await fetch(config.assessment.endpoints.start, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscriptionId, resourceGroup }),
       });
-    } catch (err) {
-      setError('Failed to assess subscription');
-    } finally {
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `API error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const newJobId = data.jobId;
+      setJobId(newJobId);
+      setStatus('running');
+
+      // Connect to SSE for real-time logs
+      const es = new EventSource(config.assessment.endpoints.jobProgress(newJobId));
+      eventSourceRef.current = es;
+
+      es.addEventListener('log', (e) => {
+        const entry: LogEntry = JSON.parse(e.data);
+        setLogs((prev) => [...prev, entry]);
+      });
+
+      es.addEventListener('status', (e) => {
+        const d = JSON.parse(e.data);
+        setStatus(d.status);
+      });
+
+      es.addEventListener('complete', (e) => {
+        const d = JSON.parse(e.data);
+        setStatus(d.status);
+        if (d.error) setError(d.error);
+        setIsRunning(false);
+        es.close();
+      });
+
+      es.onerror = () => {
+        fetch(config.assessment.endpoints.jobStatus(newJobId))
+          .then((r) => r.json())
+          .then((d) => {
+            setStatus(d.status);
+            if (d.status === 'failed') setError(d.error || 'Assessment failed');
+          })
+          .catch(() => setError('Lost connection to server'));
+        setIsRunning(false);
+        es.close();
+      };
+    } catch (err: any) {
+      setError(err.message || 'Failed to start assessment');
       setIsRunning(false);
     }
+  };
+
+  const handleDownloadReport = async () => {
+    if (!jobId || !extractedSub || !extractedRg) return;
+    const url = config.assessment.endpoints.report(jobId, extractedSub, extractedRg);
+    window.open(url, '_blank');
   };
 
   return (
     <div className="flex-1 p-8 space-y-8 overflow-auto">
       {/* Header */}
-      <div>
+      <div className="text-center">
         <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary mb-2">
           Azure Subscription Assessment
         </h1>
-        <p className="text-muted text-lg">
-          Analyze your Azure subscription for Terraform migration compatibility
+        <p className="text-muted text-lg max-w-2xl mx-auto">
+          Runs the assessment for your subscription and resource group to classify resources, check Terraform migration readiness, and generate a downloadable HTML report.
         </p>
       </div>
 
-      {/* Input Section */}
-      <div className="bg-white rounded-xl border border-border p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-text mb-2">
-            Natural Language Prompt
-          </label>
-          <div className="relative">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={predefinedPrompt}
-              className="w-full h-32 px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none font-mono text-sm"
-            />
-            <button
-              onClick={() => setPrompt(predefinedPrompt)}
-              className="absolute top-2 right-2 p-2 text-muted hover:text-primary transition-colors"
-              title="Use predefined prompt"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
+      {/* Prompt Input — same style as FoundryCommandCenter */}
+      <div className="w-full max-w-4xl mx-auto space-y-6">
+        <div className="relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary to-secondary rounded-lg blur opacity-30 group-hover:opacity-75 transition duration-1000 group-hover:duration-200"></div>
+          <form onSubmit={handleSubmit} className="relative bg-white/80 backdrop-blur-md rounded-lg p-4 border border-sky-100 shadow-xl shadow-sky-100/50">
+            <div className="relative">
+              <textarea
+                value={input}
+                onChange={(e) => { setInput(e.target.value); setError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
+                disabled={isRunning}
+                placeholder="Describe your assessment task, e.g. Assess subscription d0f1884d-... and resource group rg-mcp-servers"
+                className="w-full h-32 px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none font-mono text-sm"
+              />
+            </div>
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-muted">Press Enter to submit, Shift+Enter for new line</p>
+              <button
+                type="submit"
+                disabled={!input.trim() || isRunning}
+                className="px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg flex items-center gap-2 font-medium"
+              >
+                {isRunning ? (
+                  <><Sparkles className="w-4 h-4 animate-spin" /> Running...</>
+                ) : (
+                  <><ArrowRight className="w-4 h-4" /> Run Assessment</>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
 
+        {/* Help Text */}
         <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
           <p className="text-xs text-muted font-semibold mb-2">💡 Prompt Help:</p>
           <p className="text-sm text-text font-mono">
-            {predefinedPrompt}
+            Assess subscription - &lt;subscriptionId&gt; and resource group &lt;resourceGroupName&gt;
+          </p>
+          <p className="text-sm text-text font-mono mt-1">
+            Run assessment for subscription &lt;subscriptionId&gt; resource group &lt;resourceGroupName&gt;
+          </p>
+          <p className="text-xs text-muted mt-3">
+            The prompt must include both a <strong>Subscription ID</strong> (UUID) and a <strong>Resource Group</strong> name.
+            Once the assessment completes, the HTML report is uploaded to Azure Blob Storage and can be downloaded below.
           </p>
         </div>
 
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-          <p className="text-xs text-yellow-800">
-            <span className="font-semibold">Output:</span> Assessment report will be generated in HTML format and saved to the report directory.
-          </p>
-        </div>
-
-        <button
-          onClick={handleAssess}
-          disabled={isRunning || !prompt}
-          className={cn(
-            "flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200",
-            isRunning || !prompt
-              ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-              : "bg-gradient-to-r from-primary to-secondary text-white hover:shadow-lg"
-          )}
-        >
-          {isRunning ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Assessing...
-            </>
-          ) : (
-            <>
-              <Play className="w-5 h-5" />
-              Run Assessment
-            </>
-          )}
-        </button>
+        {/* Suggestion Chips */}
+        {!isRunning && !status && (
+          <div className="flex flex-wrap gap-2 justify-center">
+            {SUGGESTIONS.map((sug, i) => (
+              <button
+                key={i}
+                onClick={() => setInput(sug.value)}
+                className="px-3 py-1.5 rounded-full bg-white border border-sky-200 text-sm text-slate-600 hover:text-primary hover:border-primary/50 hover:shadow-md transition-all shadow-sm"
+              >
+                {sug.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Results Section */}
+      {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 max-w-4xl mx-auto">
+          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
           <div>
             <h3 className="font-semibold text-red-900">Error</h3>
-            <p className="text-red-700 text-sm">{error}</p>
+            <p className="text-red-700 text-sm whitespace-pre-line">{error}</p>
           </div>
         </div>
       )}
 
-      {result && (
-        <div className="space-y-6">
+      {/* Live Logs */}
+      {logs.length > 0 && (
+        <div className="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+            <span className="text-sm font-medium text-gray-300">
+              Assessment Logs {isRunning && <Loader2 className="inline w-3 h-3 animate-spin ml-2" />}
+            </span>
+            <span className={cn(
+              "text-xs font-mono px-2 py-0.5 rounded",
+              status === 'completed' ? 'bg-green-900 text-green-300' :
+              status === 'failed' ? 'bg-red-900 text-red-300' :
+              'bg-yellow-900 text-yellow-300'
+            )}>
+              {status}
+            </span>
+          </div>
+          <div className="p-4 max-h-80 overflow-y-auto font-mono text-xs space-y-1">
+            {logs.map((log, i) => (
+              <div key={i} className={cn(
+                log.level === 'error' ? 'text-red-400' :
+                log.level === 'success' ? 'text-green-400' :
+                log.level === 'warn' ? 'text-yellow-400' :
+                'text-gray-300'
+              )}>
+                <span className="text-gray-500">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
+                {log.agent && <span className="text-cyan-400">[{log.agent}]</span>}{' '}
+                {log.message}
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Download Report */}
+      {status === 'completed' && jobId && (
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6 space-y-3">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-6 h-6 text-secondary" />
-            <h2 className="text-2xl font-bold text-text">Assessment Complete</h2>
+            <CheckCircle2 className="w-6 h-6 text-green-600" />
+            <h2 className="text-xl font-bold text-green-900">Assessment Complete</h2>
           </div>
-
-          {/* Summary Cards */}
-          <div className="grid grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg border border-border p-4">
-              <p className="text-sm text-muted">Total Resources</p>
-              <p className="text-3xl font-bold text-primary mt-1">{result.totalResources}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-border p-4">
-              <p className="text-sm text-muted">Supported</p>
-              <p className="text-3xl font-bold text-secondary mt-1">{result.supported}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-border p-4">
-              <p className="text-sm text-muted">Unsupported</p>
-              <p className="text-3xl font-bold text-error mt-1">{result.unsupported}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-border p-4">
-              <p className="text-sm text-muted">Resource Groups</p>
-              <p className="text-3xl font-bold text-text mt-1">{result.resourceGroups}</p>
-            </div>
-          </div>
-
-          {/* Summary */}
-          <div className="bg-gradient-to-br from-primary/5 to-secondary/5 rounded-xl border border-primary/20 p-6">
-            <h3 className="font-semibold text-text mb-2">Summary</h3>
-            <p className="text-text">{result.summary}</p>
-          </div>
-
-          {/* HTML Report Link */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-              📄 HTML Assessment Report
-            </h3>
-            <p className="text-blue-800 text-sm mb-2">
-              Report generated successfully: <span className="font-mono font-semibold">{result.htmlReportPath}</span>
-            </p>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-              View HTML Report
-            </button>
-          </div>
-
-          {/* Warnings */}
-          {result.warnings.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-              <h3 className="font-semibold text-yellow-900 mb-2">⚠️ Warnings</h3>
-              <ul className="space-y-1">
-                {result.warnings.map((warning: string, idx: number) => (
-                  <li key={idx} className="text-yellow-800 text-sm">• {warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <p className="text-green-800 text-sm">
+            HTML report generated and uploaded to Azure Blob Storage:
+            <span className="font-mono block mt-1 text-xs">
+              assessment-reports/{extractedSub}/Assessment-Report-Latest.html
+            </span>
+          </p>
+          <button
+            onClick={handleDownloadReport}
+            className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download HTML Report
+          </button>
         </div>
       )}
     </div>

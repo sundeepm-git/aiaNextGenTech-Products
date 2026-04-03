@@ -222,14 +222,27 @@ def generate_data_blocks(export_dir, excluded_resources, rg_name):
     (export_dir / "data-block.tf").write_text(content, encoding="utf-8")
 
 def upload_and_push(export_dir, sub_id, rg_name):
-    # 1. Storage Upload
+    # 1. Storage Upload — always use AZTFEXPORT_FOLDER (distinct per-process container)
     storage_account = os.getenv("storageAccount")
-    container = os.getenv("AZURE_STORAGE_CONTAINER", "aztfexport")
+    container = os.getenv("AZTFEXPORT_FOLDER", "aztfexport")
     upload_success = False
     
     if storage_account:
         print(f"INFO: Attempting upload to Storage Account: {storage_account}...")
         try:
+            # Ensure container exists - create if it doesn't
+            print(f"INFO: Ensuring container '{container}' exists...")
+            create_res = subprocess.run([
+                AZ_CLI, "storage", "container", "create", 
+                "--account-name", storage_account, 
+                "--name", container, 
+                "--auth-mode", "login"
+            ], capture_output=True, text=True)
+            if create_res.returncode == 0:
+                print(f"INFO: Container '{container}' is ready (created or already exists)")
+            else:
+                print(f"WARNING: Container create returned: {create_res.stderr}")
+            
             res = subprocess.run([AZ_CLI, "storage", "blob", "upload-batch", "--account-name", storage_account, "--destination", container, "--source", str(export_dir), "--destination-path", f"{sub_id}/{rg_name}", "--overwrite", "true", "--auth-mode", "login"], capture_output=True, text=True)
             if res.returncode == 0:
                 print(f"SUCCESS: Files pushed to Storage Account '{storage_account}'.")

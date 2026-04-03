@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { Terminal as TerminalIcon, Download, Trash2, Maximize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { maskSensitiveValues } from '@/app/services/maskService';
 
 interface LiveTerminalProps {
   logs: string[];
@@ -18,7 +19,8 @@ export default function LiveTerminal({ logs, title = "Aztra Neural Core >_ Termi
   }, [logs]);
 
   const handleDownloadLogs = () => {
-    const blob = new Blob([logs.join('\n')], { type: 'text/plain' });
+    const maskedLogs = logs.map(l => maskSensitiveValues(l));
+    const blob = new Blob([maskedLogs.join('\n')], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -92,8 +94,8 @@ export default function LiveTerminal({ logs, title = "Aztra Neural Core >_ Termi
 
 // Simple helper to colorize logs (Could be more robust with full ANSI handling)
 function formatLogColor(text: string) {
-  // Replace simple patterns with colorful spans
-  let formatted = text
+  // Mask sensitive values first, then colorize
+  let formatted = maskSensitiveValues(text)
     .replace(/\[ERROR\]/g, '<span class="text-error font-bold">[ERROR]</span>')
     .replace(/\[SUCCESS\]/g, '<span class="text-secondary font-bold">[SUCCESS]</span>')
     .replace(/\[WARNING\]/g, '<span class="text-yellow-500 font-bold">[WARNING]</span>')

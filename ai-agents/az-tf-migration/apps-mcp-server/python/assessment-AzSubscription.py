@@ -17,10 +17,8 @@ EXCLUDED_AZURE_TYPES = [
     "Microsoft.Automation/automationAccounts",
     "Microsoft.RecoveryServices/vaults",
     "Microsoft.KeyVault/vaults",
-    "Microsoft.Storage/storageAccounts",
     "Microsoft.EventHub/namespaces",
     "Microsoft.ServiceBus/namespaces",
-    "Microsoft.ContainerRegistry/registries",
     "Microsoft.Cache/Redis",
     "Microsoft.DBforPostgreSQL/servers",
     "Microsoft.DBforMySQL/servers",
@@ -325,7 +323,7 @@ def main():
             f.write(html_report)
 
         storage_account = os.getenv("storageAccount")
-        container_name = os.getenv("containerName", "assessment-reports")
+        container_name = os.getenv("ASSESSMENT_FOLDER", "assessment-reports")  # Distinct per-process container
         stdout_msgs = []
         stderr_msgs = []
         started_at = datetime.now(timezone.utc).isoformat()

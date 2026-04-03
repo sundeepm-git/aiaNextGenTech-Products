@@ -136,7 +136,7 @@ export default function SummaryPage({ agents }: SummaryPageProps) {
                     )}>
                       {agent.status.toUpperCase()}
                     </span>
-                    {agent.progress > 0 && (
+                    {(agent.progress ?? 0) > 0 && (
                       <span className="text-xs text-muted">
                         Progress: {agent.progress}%
                       </span>
