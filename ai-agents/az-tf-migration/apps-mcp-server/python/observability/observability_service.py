@@ -262,6 +262,26 @@ class CostCalculator:
         self._pricing = pricing or _DEFAULT_PRICING
         self._cost_records: list[dict] = []
 
+    def estimate_cost(self, model: str, tokens_prompt: int, tokens_completion: int) -> dict:
+        """Estimate token cost without persisting a usage record."""
+        rates = self._pricing.get(model)
+        if not rates:
+            for key in sorted(self._pricing.keys(), key=len, reverse=True):
+                if key != "default" and model.startswith(key):
+                    rates = self._pricing[key]
+                    break
+        if not rates:
+            rates = self._pricing.get("default", {"prompt": 0.005, "completion": 0.015})
+
+        cost_prompt = (tokens_prompt / 1000) * rates["prompt"]
+        cost_completion = (tokens_completion / 1000) * rates["completion"]
+        total = round(cost_prompt + cost_completion, 6)
+        return {
+            "cost_prompt": round(cost_prompt, 6),
+            "cost_completion": round(cost_completion, 6),
+            "cost_total": total,
+        }
+
     def record_usage(
         self,
         agent_name: str,
@@ -270,19 +290,10 @@ class CostCalculator:
         tokens_prompt: int,
         tokens_completion: int,
     ):
-        # Match model name to pricing — handle Foundry variants like "gpt-4o-2024-11-20"
-        rates = self._pricing.get(model)
-        if not rates:
-            # Try prefix match: "gpt-4o-2024-11-20" -> "gpt-4o"
-            for key in sorted(self._pricing.keys(), key=len, reverse=True):
-                if key != "default" and model.startswith(key):
-                    rates = self._pricing[key]
-                    break
-        if not rates:
-            rates = self._pricing.get("default", {"prompt": 0.005, "completion": 0.015})
-        cost_prompt = (tokens_prompt / 1000) * rates["prompt"]
-        cost_completion = (tokens_completion / 1000) * rates["completion"]
-        total = round(cost_prompt + cost_completion, 6)
+        estimate = self.estimate_cost(model, tokens_prompt, tokens_completion)
+        cost_prompt = estimate["cost_prompt"]
+        cost_completion = estimate["cost_completion"]
+        total = estimate["cost_total"]
 
         record = {
             "agent": agent_name,

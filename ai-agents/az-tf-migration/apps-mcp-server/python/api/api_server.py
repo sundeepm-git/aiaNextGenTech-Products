@@ -12,6 +12,7 @@ import threading
 import io
 import time
 import re
+import json
 from datetime import datetime
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Optional
@@ -156,6 +157,8 @@ class WorkflowLogCapture(io.TextIOBase):
         self._current_agent_raw: str | None = None
         # Real metrics emitted by the workflow via [AGENT_METRICS] lines
         self._agent_metrics_cache: dict[str, dict] = {}  # agent_label -> {tokens_prompt, tokens_completion, model, tool_calls}
+        # Per-agent trace payload emitted by workflow via [AGENT_TRACE] lines
+        self._agent_trace_cache: dict[str, dict] = {}  # agent_label -> {input_prompt, output_prompt}
 
     def write(self, s: str) -> int:
         if not s:
@@ -196,6 +199,21 @@ class WorkflowLogCapture(io.TextIOBase):
                 }
             except Exception:
                 pass  # Don't crash on malformed metrics lines
+            return
+
+        # Parse [AGENT_TRACE] lines with per-agent input/output prompt snapshots
+        if "[AGENT_TRACE]:" in clean:
+            try:
+                payload = clean.split("[AGENT_TRACE]:", 1)[1].strip()
+                trace_obj = json.loads(payload)
+                raw_agent = str(trace_obj.get("agent", "")).strip()
+                label = STEP_PATTERNS.get(raw_agent, (raw_agent, None))[0]
+                self._agent_trace_cache[label] = {
+                    "input_prompt": str(trace_obj.get("input_prompt", "")).strip(),
+                    "output_prompt": str(trace_obj.get("output_prompt", "")).strip(),
+                }
+            except Exception:
+                pass
             return
 
         # Detect active agent
@@ -261,11 +279,17 @@ class WorkflowLogCapture(io.TextIOBase):
 
         # Use real metrics from the workflow's [AGENT_METRICS] line, or zeros if not available
         real = self._agent_metrics_cache.pop(agent_label, {})
+        trace_payload = self._agent_trace_cache.pop(agent_label, {})
         metric_agent_name = real.get("agent_name", self._current_agent_raw or agent_label)
         tokens_prompt = real.get("tokens_prompt", 0)
         tokens_completion = real.get("tokens_completion", 0)
         model = real.get("model", "unknown")
         tool_calls = real.get("tool_calls", 0)
+        estimated_cost = cost_calculator.estimate_cost(
+            model=model,
+            tokens_prompt=tokens_prompt,
+            tokens_completion=tokens_completion,
+        )
 
         metrics_collector.record_call(
             agent_name=metric_agent_name,
@@ -287,6 +311,14 @@ class WorkflowLogCapture(io.TextIOBase):
             tool_calls=tool_calls,
             status="ok" if success else "error",
             error=error,
+            metadata={
+                "model": model,
+                "cost_total_usd": estimated_cost["cost_total"],
+                "cost_prompt_usd": estimated_cost["cost_prompt"],
+                "cost_completion_usd": estimated_cost["cost_completion"],
+                "input_prompt": trace_payload.get("input_prompt", ""),
+                "output_prompt": trace_payload.get("output_prompt", ""),
+            },
         )
         # Only record cost if we have real token data
         if tokens_prompt > 0 or tokens_completion > 0:
@@ -372,10 +404,29 @@ def _run_pipeline(job_id: str, user_prompt: str):
     try:
         sys.stdout = capture
         sys.stderr = capture
-        run_aztf_enterprise_pipeline(user_prompt)
-        jobs.update(job_id, status="completed", progress=100)
-        jobs.append_log(job_id, "success", "Pipeline completed successfully")
-        trace_store.complete_trace(job_id, "completed")
+        result = run_aztf_enterprise_pipeline(user_prompt)
+
+        pipeline_success = False
+        pipeline_message = "Pipeline failed"
+        if isinstance(result, dict):
+            pipeline_success = bool(result.get("success", False))
+            pipeline_message = str(result.get("message", pipeline_message))
+        elif isinstance(result, bool):
+            pipeline_success = result
+            pipeline_message = "Pipeline completed successfully" if result else pipeline_message
+
+        if pipeline_success:
+            jobs.update(job_id, status="completed", progress=100)
+            jobs.append_log(job_id, "success", pipeline_message)
+            trace_store.complete_trace(job_id, "completed")
+        else:
+            current = jobs.get(job_id)
+            fallback_error = pipeline_message or "Pipeline reported failure"
+            jobs.update(job_id, status="failed", error=fallback_error)
+            if current and current.progress >= 100:
+                jobs.update(job_id, progress=95)
+            jobs.append_log(job_id, "error", fallback_error)
+            trace_store.complete_trace(job_id, "failed")
     except Exception as exc:
         jobs.update(job_id, status="failed", error=str(exc))
         jobs.append_log(job_id, "error", f"Pipeline failed: {exc}")

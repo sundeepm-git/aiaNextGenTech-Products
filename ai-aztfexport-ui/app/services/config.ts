@@ -39,6 +39,7 @@ interface AppConfig {
       resourceGroups: (subscriptionId: string) => string;
       tree: (subscriptionId: string, resourceGroup: string) => string;
       download: (container: string, blobName: string) => string;
+      downloadFull: (subscriptionId: string, resourceGroup: string) => string;
     };
   };
   deploy: {
@@ -127,6 +128,8 @@ const loadConfig = (): AppConfig => {
           `${workflowBaseUrl}/api/reports/tree?subscription_id=${encodeURIComponent(subscriptionId)}&resource_group=${encodeURIComponent(resourceGroup)}`,
         download: (container: string, blobName: string) =>
           `${workflowBaseUrl}/api/reports/download?container=${encodeURIComponent(container)}&blob_name=${encodeURIComponent(blobName)}`,
+        downloadFull: (subscriptionId: string, resourceGroup: string) =>
+          `${workflowBaseUrl}/api/reports/download-full?subscription_id=${encodeURIComponent(subscriptionId)}&resource_group=${encodeURIComponent(resourceGroup)}`,
       },
     },
     deploy: {

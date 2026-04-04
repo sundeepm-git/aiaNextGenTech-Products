@@ -1,11 +1,15 @@
 'use client';
 
+import { useState } from 'react';
 import { AgentType, AgentState } from '@/app/hooks/useAgentStream';
-import { CheckCircle2, XCircle, Clock, Activity, FileText, Download } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Activity, FileText, Download, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { config } from '@/app/services/config';
 
 interface SummaryPageProps {
   agents: Record<AgentType, AgentState>;
+  subscriptionId?: string;
+  resourceGroup?: string;
 }
 
 const AGENT_ORDER: AgentType[] = ['orchestrator', 'assessment', 'migration', 'refactoring', 'summary'];
@@ -26,7 +30,49 @@ const AGENT_DESCRIPTIONS: Record<AgentType, string> = {
   summary: 'Generates final migration report and recommendations'
 };
 
-export default function SummaryPage({ agents }: SummaryPageProps) {
+export default function SummaryPage({ agents, subscriptionId, resourceGroup }: SummaryPageProps) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingFull, setDownloadingFull] = useState(false);
+
+  const DEFAULT_SUB = 'd0f1884d-1f98-4bf1-9e15-e2986fc1bca2';
+  const DEFAULT_RG = 'rg-mcp-servers';
+
+  const resolvedSubscription = subscriptionId || DEFAULT_SUB;
+  const resolvedResourceGroup = resourceGroup || DEFAULT_RG;
+
+  const handleDownloadFull = async () => {
+    if (!resolvedSubscription || !resolvedResourceGroup) {
+      setDownloadError('Subscription ID and Resource Group are required to download full report zip.');
+      return;
+    }
+
+    setDownloadError(null);
+    setDownloadingFull(true);
+    try {
+      const url = config.reports.endpoints.downloadFull(resolvedSubscription, resolvedResourceGroup);
+      const res = await fetch(url);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `Download failed: ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const href = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `${resolvedSubscription}-${resolvedResourceGroup}-full-report.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(href);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to download full report zip';
+      setDownloadError(msg);
+    } finally {
+      setDownloadingFull(false);
+    }
+  };
+
   // Calculate overall statistics
   const completedAgents = AGENT_ORDER.filter(id => agents[id].status === 'success').length;
   const failedAgents = AGENT_ORDER.filter(id => agents[id].status === 'failed').length;
@@ -190,10 +236,21 @@ export default function SummaryPage({ agents }: SummaryPageProps) {
         <div className="bg-gradient-to-r from-primary to-secondary rounded-xl p-6 text-white text-center">
           <h3 className="text-xl font-bold mb-2">🎉 Migration Complete!</h3>
           <p className="mb-4">All agents have successfully completed their tasks.</p>
-          <button className="bg-white text-primary px-6 py-3 rounded-lg font-semibold hover:shadow-lg transition-all">
-            <Download className="w-5 h-5 inline mr-2" />
-            Download Full Report
+          <button
+            onClick={handleDownloadFull}
+            disabled={downloadingFull}
+            className="bg-white text-primary px-6 py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {downloadingFull ? (
+              <Loader2 className="w-5 h-5 inline mr-2 animate-spin" />
+            ) : (
+              <Download className="w-5 h-5 inline mr-2" />
+            )}
+            {downloadingFull ? 'Preparing Zip...' : 'Download Full Report'}
           </button>
+          {downloadError && (
+            <p className="mt-3 text-sm text-red-100">{downloadError}</p>
+          )}
         </div>
       )}
     </div>

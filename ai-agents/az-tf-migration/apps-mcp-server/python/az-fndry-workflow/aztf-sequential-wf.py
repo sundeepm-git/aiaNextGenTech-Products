@@ -404,6 +404,25 @@ def run_agent_step(openai_client, conv_id, agent_name, prompt, tool_name=None, f
             # Show the final captured text for debugging
             UI.log("RESPONSE", UI.CYAN, content)
 
+            # Emit structured trace payload for observability (trim to keep logs bounded).
+            prompt_for_trace = str(prompt or "").strip()
+            content_for_trace = str(content or "").strip()
+            if len(prompt_for_trace) > 4000:
+                prompt_for_trace = prompt_for_trace[:4000] + "..."
+            if len(content_for_trace) > 4000:
+                content_for_trace = content_for_trace[:4000] + "..."
+            print(
+                "[AGENT_TRACE]: "
+                + json.dumps(
+                    {
+                        "agent": agent_name,
+                        "input_prompt": prompt_for_trace,
+                        "output_prompt": content_for_trace,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
             # --- Phase 4: Validate — did the agent actually call its tool or just make something up? ---
             if force_tool and tool_name and looks_like_hallucination(content, tool_name):
                 if attempt < MAX_TOOL_RETRIES:
@@ -499,7 +518,12 @@ def run_aztf_enterprise_pipeline(user_prompt):
         if not sub_id or not rg_name:
             UI.log("PIPELINE", UI.RED, "Orchestrator could not extract subscriptionId and resourceGroup from the prompt.")
             UI.log("HINT", UI.YELLOW, "Example prompt: Migrate resource group 'rg-mcp-servers' from subscription d0f1884d-1f98-4bf1-9e15-e2986fc1bca2")
-            return
+            return {
+                "success": False,
+                "message": "Orchestrator could not extract subscriptionId/resourceGroup",
+                "subscriptionId": None,
+                "resourceGroup": None,
+            }
 
         UI.log("EXTRACTED", UI.GREEN, f"subscriptionId={sub_id}, resourceGroup={rg_name}")
 
@@ -615,12 +639,17 @@ def run_aztf_enterprise_pipeline(user_prompt):
         
         # Determine the final pipeline outcome and print a clear summary
         final_ok = final_out and "critical error" not in str(final_out).lower()
-        if final_ok and any(word in str(final_out).upper() for word in ["SUCCESS", "UPLOADED", "COMPLETED", "JOB STARTED", "JOB_ID"]):
+        pipeline_success = bool(final_ok and any(word in str(final_out).upper() for word in ["SUCCESS", "UPLOADED", "COMPLETED", "JOB STARTED", "JOB_ID"]))
+
+        if pipeline_success:
             UI.log("PIPELINE", UI.GREEN, "MIGRATION COMPLETE: All tools executed successfully.")
+            pipeline_message = "MIGRATION COMPLETE: All tools executed successfully"
         elif final_ok:
             UI.log("PIPELINE", UI.YELLOW, "PIPELINE FINISHED: Got output but could not confirm tool execution.")
+            pipeline_message = "PIPELINE FINISHED: Output received but tool execution could not be confirmed"
         else:
             UI.log("PIPELINE", UI.RED, "PIPELINE STALLED: One or more agents failed to call their MCP tool.")
+            pipeline_message = "PIPELINE STALLED: One or more stages failed"
             # Provide diagnostic hints for troubleshooting
             if not assess_ok:
                 UI.log("DIAGNOSE", UI.RED, "Assessment agent could not reach 'azure_assessment' MCP tool. Check MCP server connection in Foundry.")
@@ -634,6 +663,13 @@ def run_aztf_enterprise_pipeline(user_prompt):
             except Exception:
                 pass
         UI.log("CLEANUP", UI.GREEN, f"Released {len(conversations_to_cleanup)} conversation sessions.")
+
+        return {
+            "success": pipeline_success,
+            "message": pipeline_message,
+            "subscriptionId": sub_id,
+            "resourceGroup": rg_name,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────

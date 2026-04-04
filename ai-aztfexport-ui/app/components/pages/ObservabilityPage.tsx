@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, BarChart3, Clock, DollarSign, RefreshCw, RotateCcw, Zap, AlertTriangle, CheckCircle2, XCircle, Eye } from 'lucide-react';
 import { useObservability, ObservabilityTab } from '@/app/hooks/useObservability';
+import { maskSensitiveValues } from '@/app/services/maskService';
 import type {
   MetricsResponse,
   AgentMetrics,
@@ -51,6 +52,56 @@ function HealthBadge({ health }: { health: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// InfoTip — hover tooltip for industry standard definitions
+// ---------------------------------------------------------------------------
+
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="relative inline-block ml-1 align-middle">
+      <span
+        className="cursor-help text-gray-400 hover:text-gray-600 transition-colors"
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+      >
+        <svg className="w-3.5 h-3.5 inline" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+        </svg>
+      </span>
+      {show && (
+        <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-xl leading-relaxed pointer-events-none">
+          {text}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Annotate latency values in issue strings to show both ms and seconds
+function annotateLatency(text: string): string {
+  return text.replace(/(\d+(?:\.\d+)?)\s*ms/g, (_, n) => {
+    const ms = parseFloat(n);
+    const s = ms >= 1000 ? (ms / 1000).toFixed(2) : (ms / 1000).toFixed(3);
+    return `${n}ms (${s}s)`;
+  });
+}
+
+function secondsOnly(ms: number): string {
+  const s = ms >= 1000 ? (ms / 1000).toFixed(2) : (ms / 1000).toFixed(3);
+  return `${s}s`;
+}
+
+function meetsTarget(actualMs: number, targetMs: number): boolean {
+  return actualMs <= targetMs;
+}
+
+function msAndS(ms: number): string {
+  const s = ms >= 1000 ? (ms / 1000).toFixed(2) : (ms / 1000).toFixed(3);
+  return `${ms}ms (${s}s)`;
+}
+
 function BarSimple({ label, value, max, color = 'bg-primary' }: { label: string; value: number; max: number; color?: string }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
@@ -79,21 +130,54 @@ function HealthPanel({ health }: { health: HealthSummary }) {
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-1">
           <p className="font-semibold text-yellow-800">Active Issues</p>
           {health.issues.map((issue, i) => (
-            <p key={i} className="text-sm text-yellow-700">• {issue}</p>
+            <p key={i} className="text-sm text-yellow-700">• {annotateLatency(issue)}</p>
           ))}
         </div>
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total API Calls" value={health.metrics.total_calls} icon={Activity} />
         <StatCard label="Failure Rate" value={`${(health.metrics.failure_rate * 100).toFixed(1)}%`} icon={XCircle} color="text-red-500" />
-        <StatCard label="Avg Latency" value={`${health.metrics.avg_latency_ms}ms`} icon={Clock} color="text-blue-500" />
+        <StatCard label="Avg Latency" value={secondsOnly(health.metrics.avg_latency_ms)} sub="Displayed in seconds" icon={Clock} color="text-blue-500" />
         <StatCard label="Total Cost" value={`$${health.cost.total_cost_usd.toFixed(4)}`} icon={DollarSign} color="text-green-600" />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Tokens" value={health.metrics.total_tokens.toLocaleString()} icon={Zap} color="text-purple-500" />
         <StatCard label="Retries" value={health.retries.total_retries} icon={RotateCcw} color="text-orange-500" />
         <StatCard label="Throughput" value={`${health.throughput.requests_per_minute} rpm`} icon={BarChart3} color="text-indigo-500" />
-        <StatCard label="P95 Latency" value={`${health.metrics.latency_p95_ms}ms`} icon={Clock} color="text-amber-500" />
+        <StatCard label="P95 Latency" value={secondsOnly(health.metrics.latency_p95_ms)} sub="95% of requests complete within this time" icon={Clock} color="text-amber-500" />
+      </div>
+
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">Latency Percentile Matrix</h4>
+          <p className="text-sm text-slate-600 mt-1">Industry-standard percentile definitions with current values and typical SLA targets shown in seconds.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">P50 Median</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{secondsOnly(health.metrics.latency_p50_ms)}</p>
+            <p className="text-xs font-semibold text-slate-500 mt-2">Typical target: ≤ 0.50s</p>
+            <p className={`text-xs font-semibold mt-1 ${meetsTarget(health.metrics.latency_p50_ms, 500) ? 'text-green-700' : 'text-red-700'}`}>{meetsTarget(health.metrics.latency_p50_ms, 500) ? 'Target met' : 'Target missed'}</p>
+            <p className="text-sm text-slate-600 mt-2">50% of requests finish within this time. This is the typical user experience baseline.</p>
+          </div>
+          <div className="bg-white border border-amber-200 rounded-lg p-4">
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">P95 Standard SLA</p>
+            <p className="text-2xl font-bold text-amber-900 mt-2">{secondsOnly(health.metrics.latency_p95_ms)}</p>
+            <p className="text-xs font-semibold text-amber-700 mt-2">Typical target: ≤ 2.00s</p>
+            <p className={`text-xs font-semibold mt-1 ${meetsTarget(health.metrics.latency_p95_ms, 2000) ? 'text-green-700' : 'text-red-700'}`}>{meetsTarget(health.metrics.latency_p95_ms, 2000) ? 'Target met' : 'Target missed'}</p>
+            <p className="text-sm text-amber-800 mt-2">95% of requests finish within this time. This is the standard tail-latency metric used for SLO and SLA tracking.</p>
+          </div>
+          <div className="bg-white border border-rose-200 rounded-lg p-4">
+            <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider">P99 Worst Case</p>
+            <p className="text-2xl font-bold text-rose-900 mt-2">{secondsOnly(health.metrics.latency_p99_ms)}</p>
+            <p className="text-xs font-semibold text-rose-700 mt-2">Typical target: ≤ 5.00s</p>
+            <p className={`text-xs font-semibold mt-1 ${meetsTarget(health.metrics.latency_p99_ms, 5000) ? 'text-green-700' : 'text-red-700'}`}>{meetsTarget(health.metrics.latency_p99_ms, 5000) ? 'Target met' : 'Target missed'}</p>
+            <p className="text-sm text-rose-800 mt-2">99% of requests finish within this time. This highlights near worst-case latency and reliability risk.</p>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500">
+          Note: These are typical interactive API SLO targets and should be adjusted for your workload, user expectations, and downstream dependencies.
+        </p>
       </div>
     </div>
   );
@@ -112,7 +196,26 @@ function MetricsPanel({ data }: { data: MetricsResponse }) {
         <p className="text-muted text-sm">No agent metrics recorded yet. Run a workflow to see data.</p>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Percentile Definitions Legend */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-2">Percentile Definitions (Industry Standard)</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-blue-900">
+          <div className="flex gap-2">
+            <span className="font-bold shrink-0">P50 (Median):</span>
+            <span className="text-blue-700">50% of requests complete within this time. Represents the typical user experience — half are faster, half are slower.</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="font-bold shrink-0">P95:</span>
+            <span className="text-blue-700">95% of requests complete within this time. Indicates tail latency affecting 1 in 20 users. Primary SLA monitoring threshold.</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="font-bold shrink-0">P99:</span>
+            <span className="text-blue-700">99% of requests complete within this time. Near-worst-case latency — 1 in 100 users may experience this or worse. Critical for SLA commitments.</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl border border-border p-5 space-y-3">
               <h4 className="text-sm font-semibold text-muted uppercase tracking-wider">Calls per Agent</h4>
               {agents.map(a => (
@@ -144,9 +247,18 @@ function MetricsPanel({ data }: { data: MetricsResponse }) {
                   <th className="text-right px-4 py-3 font-semibold text-muted">Retries</th>
                   <th className="text-right px-4 py-3 font-semibold text-muted">Tokens</th>
                   <th className="text-right px-4 py-3 font-semibold text-muted">Tool Calls</th>
-                  <th className="text-right px-4 py-3 font-semibold text-muted">P50</th>
-                  <th className="text-right px-4 py-3 font-semibold text-muted">P95</th>
-                  <th className="text-right px-4 py-3 font-semibold text-muted">P99</th>
+                  <th className="text-right px-4 py-3 font-semibold text-muted">
+                    P50
+                    <InfoTip text="P50 (Median): 50th percentile — half of all requests complete within this time. Represents the typical user experience baseline." />
+                  </th>
+                  <th className="text-right px-4 py-3 font-semibold text-muted">
+                    P95
+                    <InfoTip text="P95: 95th percentile — 95% of requests complete faster than this. Indicates tail latency affecting 1 in 20 users. Standard SLA monitoring threshold." />
+                  </th>
+                  <th className="text-right px-4 py-3 font-semibold text-muted">
+                    P99
+                    <InfoTip text="P99: 99th percentile — 99% of requests complete faster than this. Near-worst-case latency; 1 in 100 users may experience this or worse. Critical for SLA commitments and reliability targets." />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -160,9 +272,9 @@ function MetricsPanel({ data }: { data: MetricsResponse }) {
                     <td className="text-right px-4 py-3">{a.total_retries}</td>
                     <td className="text-right px-4 py-3">{a.total_tokens.toLocaleString()}</td>
                     <td className="text-right px-4 py-3">{a.total_tool_calls}</td>
-                    <td className="text-right px-4 py-3">{a.p50_latency_ms}ms</td>
-                    <td className="text-right px-4 py-3">{a.p95_latency_ms}ms</td>
-                    <td className="text-right px-4 py-3">{a.p99_latency_ms}ms</td>
+                    <td className="text-right px-4 py-3">{msAndS(a.p50_latency_ms)}</td>
+                    <td className="text-right px-4 py-3">{msAndS(a.p95_latency_ms)}</td>
+                    <td className="text-right px-4 py-3">{msAndS(a.p99_latency_ms)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -175,6 +287,12 @@ function MetricsPanel({ data }: { data: MetricsResponse }) {
 }
 
 function TracesPanel({ traces }: { traces: Trace[] }) {
+  const toText = (v: unknown): string => {
+    if (typeof v !== 'string') return '';
+    return maskSensitiveValues(v.trim());
+  };
+  const toNumber = (v: unknown): number => (typeof v === 'number' ? v : 0);
+
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold text-text">Recent Traces</h3>
@@ -192,18 +310,44 @@ function TracesPanel({ traces }: { traces: Trace[] }) {
                 </div>
                 <span className="text-sm font-semibold text-text">{t.total_duration_ms.toLocaleString()}ms</span>
               </div>
-              <p className="text-sm text-muted mb-3 truncate">{t.prompt}</p>
+              <p className="text-sm text-muted mb-3 truncate">{maskSensitiveValues(t.prompt)}</p>
               {t.spans.length > 0 && (
-                <div className="flex gap-1 flex-wrap">
-                  {t.spans.map((s, i) => (
-                    <span
-                      key={i}
-                      className={`text-xs px-2 py-1 rounded-full ${s.status === 'ok' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
-                      title={`${s.agent}: ${s.duration_ms}ms, ${s.tokens_prompt + s.tokens_completion} tokens`}
-                    >
-                      {s.agent} ({s.duration_ms}ms)
-                    </span>
-                  ))}
+                <div className="space-y-3">
+                  {t.spans.map((s, i) => {
+                    const inputPrompt = toText((s.metadata as Record<string, unknown>)?.input_prompt);
+                    const outputPrompt = toText((s.metadata as Record<string, unknown>)?.output_prompt);
+                    const spanCost = toNumber((s.metadata as Record<string, unknown>)?.cost_total_usd);
+
+                    return (
+                      <div key={i} className="border border-border rounded-lg p-3 bg-gray-50/60">
+                        <div className="flex items-center justify-between mb-2">
+                          <span
+                            className={`text-xs px-2 py-1 rounded-full ${s.status === 'ok' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                            title={`${s.agent}: ${s.duration_ms}ms, ${s.tokens_prompt + s.tokens_completion} tokens`}
+                          >
+                            {s.agent} ({s.duration_ms}ms)
+                          </span>
+                          <span className="text-xs text-muted">
+                            Tokens: {(s.tokens_prompt + s.tokens_completion).toLocaleString()} | Cost: ${spanCost.toFixed(6)}
+                          </span>
+                        </div>
+
+                        {inputPrompt && (
+                          <div className="mb-2">
+                            <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Input Prompt</p>
+                            <pre className="text-xs text-text whitespace-pre-wrap break-words bg-white border border-border rounded p-2 max-h-40 overflow-auto">{inputPrompt}</pre>
+                          </div>
+                        )}
+
+                        {outputPrompt && (
+                          <div>
+                            <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Output Prompt</p>
+                            <pre className="text-xs text-text whitespace-pre-wrap break-words bg-white border border-border rounded p-2 max-h-48 overflow-auto">{outputPrompt}</pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

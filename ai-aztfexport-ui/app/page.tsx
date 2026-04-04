@@ -20,6 +20,9 @@ import { useExportProgress } from './hooks/useExportProgress';
 import { useAgenticWorkflow } from './hooks/useAgenticWorkflow';
 import { config } from './services/config';
 
+const SUBSCRIPTION_ID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+const RESOURCE_GROUP_RE = /resource\s*group\s*['\"]?([A-Za-z0-9._-]+)['\"]?/i;
+
 // Map SSE agent names from the API to AgentType IDs used by AgentPipeline
 const AGENT_NAME_MAP: Record<string, AgentType> = {
   'Orchestrator': 'orchestrator',
@@ -73,6 +76,7 @@ export default function Home() {
   
   // State to track if we're showing real migration progress
   const [showRealMigration, setShowRealMigration] = useState(false);
+  const [workflowTarget, setWorkflowTarget] = useState<{ subscriptionId?: string; resourceGroup?: string }>({});
 
   // Auto-switch view to the active agent unless user selected something specific
   useEffect(() => {
@@ -138,6 +142,13 @@ export default function Home() {
     // Reset pipeline visuals to idle before starting
     resetAgents();
 
+    const subMatch = cmd.match(SUBSCRIPTION_ID_RE);
+    const rgMatch = cmd.match(RESOURCE_GROUP_RE);
+    setWorkflowTarget({
+      subscriptionId: subMatch?.[0],
+      resourceGroup: rgMatch?.[1],
+    });
+
     // Start the real agentic workflow — AgentPipeline will update via the useEffect above
     startWorkflow(cmd);
   };
@@ -171,7 +182,13 @@ export default function Home() {
       case 'refactoring':
         return <RefactoringPage />;
       case 'summary':
-        return <SummaryPage agents={agents} />;
+        return (
+          <SummaryPage
+            agents={agents}
+            subscriptionId={workflowTarget.subscriptionId}
+            resourceGroup={workflowTarget.resourceGroup}
+          />
+        );
       case 'report':
         return <ReportPage />;
       case 'observability':

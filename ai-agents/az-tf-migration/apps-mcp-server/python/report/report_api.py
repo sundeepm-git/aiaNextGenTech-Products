@@ -19,6 +19,7 @@ from report_service import (
     list_resource_groups,
     get_report_tree,
     download_blob,
+    build_full_report_zip,
     REPORT_CONTAINERS,
 )
 
@@ -78,5 +79,23 @@ def api_download_report(
     return Response(
         content=content,
         media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@report_router.get("/download-full")
+def api_download_full_bundle(
+    subscription_id: str = Query(..., min_length=10),
+    resource_group: str = Query(..., min_length=1),
+):
+    """Download full report bundle zip (HTML reports + refactored code artifacts)."""
+    bundle = build_full_report_zip(subscription_id, resource_group)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="No reports or refactored code found for this subscription/resource group")
+
+    content, filename = bundle
+    return Response(
+        content=content,
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
